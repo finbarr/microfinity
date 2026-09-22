@@ -42,6 +42,11 @@ export class Room {
   private makeSeat(index:number):Seat {const botType=this.settings.botTypes[index]??this.settings.botType;return {id:`p${index}`,name:`${botType==='jev'?'Jev':'Bot'} ${index+1}`,color:colors[index],ready:true,loaded:false,controller:botType,botType,epoch:0,seq:0,held:emptyButtons(),queued:[],clock:new NetworkClock(),rejected:{},scheduler:new DecisionScheduler(Number(process.env.JEV_INTERVAL_MS)||200),history:[],lastInput:0,methods:new Set(),sources:new Set()};}
   private syncBotSettings(){this.settings.targetPlayers=this.seats.length;this.settings.botTypes=this.seats.map(s=>s.botType);}
   private setupChanged(){this.challengeId='';this.revision++;this.syncBotSettings();for(const s of this.seats)s.ready=!s.ws;this.broadcast();}
+  renameGuest(guestId:string,name:string){return this.sequence(()=>{
+    if(this.closed)return;
+    const seat=this.seats.find(s=>s.guestId===guestId);if(!seat)return;
+    seat.name=z.string().trim().min(1).max(24).parse(name);this.broadcast();
+  });}
   join(guest:{id:string;name:string},ws:WebSocket){return this.sequence(()=>{
     if(this.closed||ws.readyState!==1)throw new Error('This party connection has closed');
     let seat=this.seats.find(s=>s.guestId===guest.id);

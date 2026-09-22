@@ -34,13 +34,13 @@ To add covers to older local cartridges, run `node --import tsx scripts/backfill
 
 ## Play
 
-- **Play** starts the selected cartridge directly. **Random Party** starts four compatible games immediately, with Jev filling the spare seat. No configuration or Ready step is required.
-- To invite friends before play, add games with **+** and create a separate party lobby. Hosts can reorder the queue and manage seats there.
+- **Quick Play** picks games when nothing is selected; **Play selected** starts the cartridges picked with **+**. A cartridge's **Play** button starts that game directly.
+- **Create Party** keeps you on the home screen, with the invite link and connected players between the start controls and cartridge selector. The host selects games there and presses **Start Party** to launch the whole playlist for everyone. Guests see the shared selections. Header name changes update the connected party immediately.
 - The end screen offers **Play again** and **Back to arcade**, plus optional 1–5 star ratings for the cartridges you finished. Play again keeps the playlist and refreshes its variation. Recent-party history shows completed scores and challenge links.
 - Menus: WASD/arrows move the highlight within the current screen; they never jump into the header. Space/Enter confirm. Escape opens Options, or closes the current overlay. The Options button opens the same menu by click. Enter a text field to edit; Escape returns to navigation. Tab still works.
 - Gameplay: WASD or arrow keys plus Space. Phones use the same logical buttons on a digital pad.
 - Toast Catch supports reusable independent races, obstruction, and pressure modes. Other cartridges have their own declared arrangements.
-- Use **Make a game for this party** to keep friends connected while creating, then add the finished version to the queue.
+- In a party, **Make a game** and **Remix** keep friends connected while the host creates, then the finished version can be added to the shared playlist.
 - Game briefs, code and repairs default to GPT-6 Sol with high reasoning. Music keeps its separate GPT-5 Mini default; artwork uses the configured image model.
 - Use **Make a game** for a natural-language prompt. Code, gameplay artwork, a cartridge cover, and music generate in separate branches. A valid draft can be played while assets are pending; finished media creates a new immutable version.
 

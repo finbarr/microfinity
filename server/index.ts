@@ -30,7 +30,7 @@ const auth=async(req:express.Request)=>store.authenticate(req.headers.authorizat
 app.get('/api/ratings',async(_req,res)=>res.json(await ratingSummaries(store)));
 app.get('/api/matches/:id/ratings',async(req,res)=>{const guest=await auth(req);res.json(await playedRatings(store,req.params.id,guest.id));});
 app.post('/api/ratings',async(req,res)=>{const guest=await auth(req);res.json(await rateCartridge(store,guest.id,req.body));});
-app.post('/api/guest/name',async(req,res)=>{const guest=await auth(req),name=z.string().trim().min(1).max(24).parse(req.body.name);await store.query('UPDATE guests SET name=$1 WHERE id=$2',[name,guest.id]);res.json({name});});
+app.post('/api/guest/name',async(req,res)=>{const guest=await auth(req),name=z.string().trim().min(1).max(24).parse(req.body.name);await store.query('UPDATE guests SET name=$1 WHERE id=$2',[name,guest.id]);await Promise.all([...rooms.values()].map(room=>room.renameGuest(guest.id,name)));res.json({name});});
 const generation=new GenerationService(store);
 app.post('/api/jobs',async(req,res)=>{const guest=await auth(req),body=z.object({prompt:z.string().min(12).max(2000),art:z.boolean().optional(),remix:z.string().optional(),format:z.object({clock:z.enum(['realtime','action']).optional(),minPlayers:z.number().int().min(1).max(4).optional(),maxPlayers:z.number().int().min(1).max(4).optional()}).optional()}).strict().parse(req.body);res.json(await generation.create(guest.id,body.prompt,body));});
 app.get('/api/jobs',async(req,res)=>{const guest=await auth(req);res.json(await store.query("SELECT id,status,record->>'title' AS title,record->>'prompt' AS prompt,record->>'previewVersion' AS version FROM jobs WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 30",[guest.id]));});

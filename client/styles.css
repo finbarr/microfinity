@@ -179,3 +179,15 @@
   .header-right .sound-settings span,.header-right .sound-settings kbd{display:none}
   .header-right .sound-settings{font-size:19px}
 }
+
+/* Keep party setup beside the shared home-screen cartridge selection. */
+.home-party{max-width:1204px;margin:0 auto 18px;padding:20px;background:#171e30;border:2px solid #4b5d76}
+.home-party-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.home-party-heading h2{font-size:16px;margin:0;color:var(--cyan)}
+.home-party-heading>span{font-size:11px;color:var(--muted);white-space:nowrap}
+.home-party .party-invite{padding:13px 15px;box-shadow:none;border-width:1px}
+.home-party .party-member-list{margin-top:16px}
+.home-party .party-member{min-width:190px;flex:0 1 240px}
+.home-party-hint{margin:16px 0 0;font-size:11px;line-height:1.7;color:var(--muted)}
+.selected-games button:disabled{opacity:1;cursor:default}
+@media(max-width:700px){.home-party{margin:0 18px 16px;padding:15px}.home-party-heading h2{font-size:13px}.home-party-heading>span{font-size:10px}.home-party .party-member{min-width:0;flex:1 1 150px}.home-party .party-invite{gap:12px}.home-party .party-invite strong{font-size:10px}}

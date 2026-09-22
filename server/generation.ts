@@ -74,7 +74,8 @@ export class GenerationService {
       if(job.reuseMusic&&!previous?.manifest.music)throw new Error('This version has no saved soundtrack to reuse');
       const gameId=previous?.manifest.gameId??`creation-${job.id.slice(0,12)}`;
       let compiled:{source:string;code:string;meta:any;audio?:any}|undefined,assets:Asset[]=(job.musicOnly||!wantArt)?previous?.manifest.assets??[]:[],music:any=job.reuseMusic?previous?.manifest.music??null:null;
-      let icon:Asset|undefined=(job.musicOnly||job.mediaOnly||!wantArt)?previous?.manifest.icon:undefined;
+      // Gameplay artwork reuse never implies cover reuse for a rules remix.
+      let icon:Asset|undefined=(job.musicOnly||job.mediaOnly)?previous?.manifest.icon:undefined;
       job.previewArt=assets;if(music)job.previewMusic=music;if(icon)job.previewIcon=icon;
       const publish=async(final:boolean)=>{
         if(!compiled)return;

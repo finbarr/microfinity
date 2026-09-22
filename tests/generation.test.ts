@@ -215,12 +215,31 @@ test('a new game starts a playable draft while its dedicated icon is still pendi
  }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
 });
 
+test('a rules remix reuses gameplay art but generates its own cover',async()=>{
+ const key=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='fixture-only';
+ try{
+  const source=partySource(await readFile('games/toast-catch.ts','utf8'));
+  const cover=await sharp({create:{width:80,height:80,channels:3,background:{r:30,g:80,b:180}}}).png().toBuffer();
+  const prompts:string[]=[];
+  const fetcher=(async(_url:any,init:any)=>{const body=JSON.parse(String(init.body));prompts.push(body.prompt);return new Response(JSON.stringify({created:1,data:[{b64_json:cover.toString('base64')}]}),{headers:{'content-type':'application/json'}});}) as typeof fetch;
+  const f=fixture({},fetcher);(f.original.manifest as any).icon={name:'cartridge-icon',hash:'parent-cover',url:'/assets/parent-cover.png',width:256,height:256};
+  (f.service as any).json=async(_j:any,_m:any,branch:string)=>branch==='brief'?f.brief:branch==='cartridge'?{source}:stockScore('toast-catch');
+  const job=await f.service.create('owner','Change the breakfast rules but retain gameplay art',{remix:'original',art:false});
+  await until(()=>f.records.at(-1)?.status!=='working');const done=await f.service.get(job.id,'owner');
+  assert.equal(done.status,'ready',done.error??'Unexpected failure');assert.equal(done.branches.art,'reused');assert.equal(done.branches.icon,'ready');
+  assert.equal(done.budget?.reserved.images,1);assert.equal(prompts.length,1);assert.match(prompts[0],/square cover illustration/);
+  const final=f.versions.at(-1);assert.deepEqual(final.manifest.assets,f.original.manifest.assets);assert.notEqual(final.manifest.icon.hash,'parent-cover');assert.deepEqual(done.previewIcon,final.manifest.icon);
+ }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
+});
+
 test('an icon provider failure keeps an icon-less game playable and records branch failure',async()=>{
  const key=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='fixture-only';
  try{
   const fetcher=(async()=>new Response(JSON.stringify({error:{message:'fixture icon failure',type:'server_error'}}),{status:500,headers:{'content-type':'application/json'}})) as typeof fetch;
-  const f=fixture({},fetcher);(f.service as any).json=async(_j:any,_m:any,branch:string)=>branch==='brief'?f.brief:stockScore('toast-catch');
-  const job=await f.service.create('owner','Refresh the media of this existing game',{remix:'original',mediaOnly:true,art:false});
+  const f=fixture({},fetcher);(f.original.manifest as any).icon={name:'cartridge-icon',hash:'parent-cover',url:'/assets/parent-cover.png',width:256,height:256};
+  const source=partySource(await readFile('games/toast-catch.ts','utf8'));
+  (f.service as any).json=async(_j:any,_m:any,branch:string)=>branch==='brief'?f.brief:branch==='cartridge'?{source}:stockScore('toast-catch');
+  const job=await f.service.create('owner','Remix the fixture rules and reuse gameplay artwork',{remix:'original',art:false});
   await until(()=>f.records.at(-1)?.status!=='working');const done=await f.service.get(job.id,'owner');
   assert.equal(done.status,'ready',done.error??'Unexpected failure');assert.equal(done.branches.icon,'failed');assert.match(done.iconError!,/fixture icon failure/);
   assert.ok(done.previewVersion);assert.ok(done.finishedVersion);assert.equal(f.versions.at(-1).manifest.icon,undefined);

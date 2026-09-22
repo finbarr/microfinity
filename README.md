@@ -39,6 +39,7 @@ To add covers to older local cartridges, run `node --import tsx scripts/backfill
 - Gameplay: WASD or arrow keys plus Space. Phones use the same logical buttons on a digital pad.
 - Toast Catch supports reusable independent races, obstruction, and pressure modes. Other cartridges have their own declared arrangements.
 - Use **Make a game for this party** to keep friends connected while creating, then add the finished version to the queue.
+- Game briefs, code and repairs default to GPT-6 Sol with high reasoning. Music keeps its separate GPT-5 Mini default; artwork uses the configured image model.
 - Use **Make a game** for a natural-language prompt. Code, gameplay artwork, a cartridge cover, and music generate in separate branches. A valid draft can be played while assets are pending; finished media creates a new immutable version.
 
 Jev uses only filtered player observations. Its current fallback is a clearly recorded scripted baseline when requests fail; legal decisions do not establish strong play. The first provider probe is recorded in `evidence/provider-probe.json`.

@@ -241,3 +241,26 @@ test('an expired icon request cannot publish late output after a playable previe
   assert.equal(f.versions.length,1);assert.deepEqual(f.versions[0],preview);assert.equal((await f.service.get(job.id,'owner')).finishedVersion,undefined);
  }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
 });
+
+test('game requests use GPT-6 Sol high while soundtrack requests retain GPT-5 Mini low',async()=>{
+ const env={OPENAI_API_KEY:process.env.OPENAI_API_KEY,CODE_MODEL:process.env.CODE_MODEL,MUSIC_MODEL:process.env.MUSIC_MODEL};
+ process.env.OPENAI_API_KEY='fixture-only';delete process.env.CODE_MODEL;delete process.env.MUSIC_MODEL;
+ try{
+  const originalSource=partySource(await readFile('games/toast-catch.ts','utf8'));
+  const badSource=originalSource+'\nconst marker: number = "broken";';
+  const requests:any[]=[];let codeCalls=0;
+  const f=fixture({},async(_url,init)=>{
+   const body=JSON.parse(String(init?.body));
+   if(!body.text)return new Response(JSON.stringify({error:{message:'fixture icon unavailable'}}),{status:500,headers:{'content-type':'application/json'}});
+   requests.push(body);const branch=body.text.format.name;
+   const data=branch==='brief'?f.brief:branch==='music'?stockScore('toast-catch'):{source:++codeCalls===1?badSource:originalSource};
+   return new Response(JSON.stringify({id:'response-fixture',object:'response',status:'completed',model:body.model,output_text:JSON.stringify(data),output:[{type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify(data),annotations:[]}]}],usage:{input_tokens:1,output_tokens:1,total_tokens:2}}),{headers:{'content-type':'application/json'}});
+  });
+  const job=await f.service.create('owner','Change this fixture game and soundtrack',{remix:'original',art:false});
+  await until(()=>f.records.at(-1)?.status!=='working');const done=await f.service.get(job.id,'owner');
+  assert.equal(done.status,'ready',done.error??'Unexpected failure');
+  assert.deepEqual(requests.map(r=>r.text.format.name).sort(),['brief','cartridge','cartridge','music']);
+  for(const request of requests){const music=request.text.format.name==='music';assert.equal(request.model,music?'gpt-5-mini':'gpt-6-sol');assert.equal(request.reasoning.effort,music?'low':'high');}
+  assert.equal((done.usage.find((u:any)=>u.branch==='cartridge') as any).reasoningEffort,'high');
+ }finally{for(const [key,value] of Object.entries(env))if(value===undefined)delete process.env[key];else process.env[key]=value;}
+});

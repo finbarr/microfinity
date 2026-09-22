@@ -49,15 +49,16 @@ export class GenerationService {
   private async save(job:Job){await this.store.query("INSERT INTO jobs(id,owner_id,status,record) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,record=EXCLUDED.record WHERE jobs.status='working'",[job.id,job.ownerId,job.status,JSON.stringify(job)]);}
   private async json(job:Job,model:string,name:string,schema:any,prompt:string,maxTokens=5000){
     const budget=this.budget(job),client=new OpenAI({apiKey:process.env.OPENAI_API_KEY,timeout:150000,maxRetries:0,fetch:this.providerFetch});
-    const body={model,input:prompt,max_output_tokens:maxTokens,...(model.startsWith('gpt-5')?{reasoning:{effort:'low' as const}}:{}),text:{format:{type:'json_schema' as const,name,schema,strict:true}}};budget.reserve(body,maxTokens);
+    const reasoningEffort=name==='music'?'low' as const:'high' as const;
+    const body={model,input:prompt,max_output_tokens:maxTokens,...(/^gpt-[56]/.test(model)?{reasoning:{effort:reasoningEffort}}:{}),text:{format:{type:'json_schema' as const,name,schema,strict:true}}};budget.reserve(body,maxTokens);
     const response=await client.responses.create(body,{signal:budget.signal});budget.check();
-    job.usage.push({branch:name,model:response.model,usage:response.usage});job.models[name]=response.model;
+    job.usage.push({branch:name,model:response.model,reasoningEffort:body.reasoning?.effort,usage:response.usage});job.models[name]=response.model;
     if(!response.output_text)throw new Error(`${name} returned no usable output`);return JSON.parse(response.output_text);
   }
   private async run(job:Job,wantArt:boolean){
     const budget=this.budget(job),work=<T>(operation:()=>Promise<T>|T)=>this.work(job,operation);
     try{
-      const model=process.env.CODE_MODEL??'gpt-5-mini',musicModel=process.env.MUSIC_MODEL??model;
+      const model=process.env.CODE_MODEL??'gpt-6-sol',musicModel=process.env.MUSIC_MODEL??'gpt-5-mini';
       job.branches.brief='working';await work(()=>this.save(job));
       const previous=job.remix?await work(()=>this.store.version(job.remix!)):undefined;
       const retainedClock=(job.musicOnly||job.mediaOnly)?previous?.manifest.meta.clock:undefined;

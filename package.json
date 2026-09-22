@@ -1,0 +1,54 @@
+{
+  "name": "microfinity",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx server/index.ts",
+    "build": "node --import tsx scripts/build.ts && vite build",
+    "start": "node scripts/start.mjs",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test --test-concurrency=4 tests/*.test.ts",
+    "seed": "node --import tsx scripts/seed.ts",
+    "test:episodes": "node --import tsx scripts/episodes.ts"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "dotenv": "18.0.2",
+    "express": "5.2.1",
+    "openai": "7.21.0",
+    "pg": "8.23.0",
+    "quickjs-emscripten": "0.32.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "sharp": "0.35.4",
+    "ws": "8.21.3",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/express": "5.0.6",
+    "@types/node": "26.6.2",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/ws": "8.18.1",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vite": "8.3.0"
+  },
+  "description": "An open-source browser arcade for multiplayer microgames, prompt-generated cartridges, and real-time AI players.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/finbarr/microfinity.git"
+  },
+  "bugs": {
+    "url": "https://github.com/finbarr/microfinity/issues"
+  },
+  "homepage": "https://github.com/finbarr/microfinity#readme"
+}

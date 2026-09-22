@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "paths": {
+      "@microfinity/sdk": [
+        "./sdk/index.ts"
+      ],
+      "@minifinity/sdk": [
+        "./sdk/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "sdk",
+    "runtime",
+    "server",
+    "client",
+    "games",
+    "scripts",
+    "tests",
+    "vite.config.ts"
+  ]
+}

@@ -1,0 +1,3 @@
+import {readFile,writeFile} from 'node:fs/promises';import {compile} from '../server/compiler';import {RuntimeProcess} from '../server/runtime-process';
+const runner=await RuntimeProcess.create(await compile(await readFile('games/toast-catch.ts','utf8')));
+try{await runner.call('init',{seed:19,difficulty:1,players:[{id:'p0',name:'Probe',color:'#86efac'}]});const result=await runner.call('step',{});if(result.tick!==1)throw new Error('Incorrect production step');await writeFile('evidence/production-runtime.json',JSON.stringify({at:new Date().toISOString(),passed:true,permissionRestrictedProcess:process.env.NODE_ENV==='production',tick:result.tick},null,2));console.log('Production runtime: permission-restricted child loaded and stepped.');}finally{runner.dispose();}

@@ -77,7 +77,7 @@ test('cursor, aiming, projectiles and scheduled spawning stay bounded and reprod
  assert.throws(()=>spawnDue(spawn,1,0),/spawn period/);assert.throws(()=>projectile(0,0,NaN,1),/angle/);
 });
 
-test('a single-file cartridge compiles the helpers and restores/replays its full state in QuickJS',async()=>{
+test('a single-file cartridge compiles the helpers and restores its full state in QuickJS',async()=>{
  const source=`import {defineGame,createSequence,advanceSequence,createDirectionRepeat,focusGrid,createButtonHold,trackHold,createSpawnClock,spawnDue,projectile,stepProjectile,aimAngle} from '@microfinity/sdk';
  export default defineGame({meta:{id:'sdk-helper-fixture',title:'Helper fixture',instruction:'Follow the sequence',description:'Local authoring fixture',players:[1,1],clock:'realtime',participation:'individual',world:'shared',duration:3,style:'pixel',score:{unit:'presses',order:'higher'},controls:{directions:true,action:'Confirm'},tags:[],modifiers:[]},
  init(){return {sequence:createSequence(['right','action','action'],0,1),repeat:createDirectionRepeat(),hold:createButtonHold(),spawn:createSpawnClock(.1),shots:[] as {x:number;y:number;vx:number;vy:number;life:number}[],focus:0,angle:0};},

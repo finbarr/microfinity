@@ -14,7 +14,7 @@ The defining experience is:
 2. Choose an existing challenge, select games, or request a compatible random playlist.
 3. Optionally create or remix a game with a natural-language prompt, including custom artwork.
 4. Play a rapid sequence with clear instructions, short countdowns, lively feedback, and minimal waiting.
-5. See round results, overall standings, personal bests, and a useful replay or rematch option.
+5. See round results, overall standings, personal bests, completed-party summaries, and a simple rematch option.
 
 The party experience must keep waiting players engaged. A rotating active player with opponents interfering is a core mode, not a future add-on. Simultaneous shared-arena games are also core.
 
@@ -39,7 +39,7 @@ All shipped characters, artwork, music, and games should be original. The visual
 - Engine-owned lo-fi interaction sounds and a per-game retro soundtrack generation step that can run alongside code and artwork creation.
 - Immediate play of newly generated cartridges through runtime compilation/loading, without an application rebuild, server restart, or developer file edit.
 - A working Jev adapter and a deterministic scripted controller for development, testing, and fallback.
-- Replayable execution, headless simulation, and documented RL adapters.
+- Serializable live execution, headless simulation, and documented RL adapters.
 - Browser playtesting, multiplayer verification, and evidence against the acceptance criteria.
 
 ### Deliberately outside this release
@@ -65,7 +65,7 @@ Gameplay is entirely controller-based: keyboard on desktop and an equivalent vir
 - The host can select an ordered playlist. Random compatibility constraints remain engine capabilities; the default launch screen does not expose them as a form.
 - Random playlists are resolved and pinned before their rounds start. Store both the selection seed and the resulting entries.
 - A challenge link identifies immutable game versions, settings, ordering, and seed policy. A friend can attempt the same challenge later through the backend without the original host being online.
-- The end screen shows scores and only two choices: Play again and Back to arcade. Play again starts the same games with fresh variation; do not expose seeds, multiple rematch choices, editing, sharing or replay as a wall of result buttons. Exact pinned challenges and recorded replays remain available through their dedicated links/history.
+- The end screen shows scores and only two choices: Play again and Back to arcade. Play again starts the same games with fresh variation; do not expose seeds, multiple rematch choices, editing or sharing as a wall of result buttons. Exact pinned challenges and completed-party summaries remain available through their dedicated links/history.
 
 ### Cartridge ratings and discovery
 
@@ -241,7 +241,7 @@ Audio is part of the SDK's presentation kit. Provide short original, configurabl
 
 Cartridges select a sound pack and emit semantic feedback events such as `ctx.feedback("catch", { entityId })`. The engine maps these to coordinated sounds, particles, and reactions. Allow a bounded pitch/timbre variant or manifest asset override when a game needs character. Basic interactions must work with built-in sounds immediately; authors must not generate or program an entire sound library for every game.
 
-Generated code never constructs an AudioContext, accesses raw Web Audio nodes, loads arbitrary audio URLs, or starts sound on every draw call. Deduplicate confirmed/predicted feedback by event identifier; replay and reconciliation must not play the same hit repeatedly. Bound concurrent voices and repeated effects, prioritize important cues, and clean up every source when the round ends.
+Generated code never constructs an AudioContext, accesses raw Web Audio nodes, loads arbitrary audio URLs, or starts sound on every draw call. Deduplicate live feedback by event identifier so repeated network delivery cannot play the same hit twice. Bound concurrent voices and repeated effects, prioritize important cues, and clean up every source when the round ends.
 
 ### Per-game music generation
 
@@ -267,7 +267,7 @@ Preload and decode selected audio before the round where possible. Play local de
 
 Music is presentation, not the authoritative clock. Rhythm/timing windows and any tempo ramp come from recorded simulation state, with redundant visual cues and structured events available to controllers. In Skill Continue, explicitly schedule the accelerating cue pattern from that state; a soundtrack of uncertain beat timing must not define when a hit succeeds. Do not change gameplay difficulty based on audio decoding or device latency.
 
-Background/resume, orientation changes, reconnects, replay seeking, and round replacement must not accumulate duplicate loops or leave stuck notes. A resumed client starts or seeks its local music to the appropriate round position. Record enough metadata and feedback events for consistent replay, without claiming sample-perfect cross-device synchronization. Device output latency and physical speaker quality remain measured/reportable limits.
+Background/resume, orientation changes, reconnects, and round replacement must not accumulate duplicate loops or leave stuck notes. A resumed client starts or seeks its local music to the appropriate round position. Live feedback carries enough metadata to avoid duplicate cues, without claiming sample-perfect cross-device synchronization. Device output latency and physical speaker quality remain measured/reportable limits.
 
 ### Generated assets
 
@@ -320,13 +320,13 @@ Preload upcoming rounds and synchronize a future start time. Specify behavior fo
 
 ## 7. Backend and networking
 
-Recommended baseline: TypeScript, Node.js, Colyseus for room/connection lifecycle, PostgreSQL for durable records, and an object-storage interface for assets and replays. Local development may use a filesystem implementation of object storage. Use supported dependency versions verified during implementation.
+Recommended baseline: TypeScript, Node.js, Colyseus for room/connection lifecycle, PostgreSQL for durable records, and an object-storage interface for assets. Local development may use a filesystem implementation of object storage. Use supported dependency versions verified during implementation.
 
 Keep the game runtime independent of Colyseus. Room metadata can use a stable schema; generated per-player game views can use a versioned, validated message format. Do not expose framework-specific schema definitions to the game-writing model. Sending a complete hidden state to every client is not acceptable.
 
 The room owns player membership, playlist execution, game and mode simulation, input validation, authoritative scores, and final results. WebSockets carry inputs, bounded view snapshots/patches, acknowledgments, and discrete feedback events.
 
-Begin with modest snapshots and measure before adding custom binary protocols. Avoid a database write per simulation tick. Journal accepted inputs/events and use periodic checkpoints, then persist completed results idempotently.
+Begin with modest snapshots and measure before adding custom binary protocols. Avoid a database write per simulation tick. Persist match identity and attempts at start, then commit completed scores and compact round summaries atomically. Do not persist live input journals or periodic game-state checkpoints.
 
 Target fixed-step 60 Hz simulation for the reference action games, with a separately configurable snapshot cadence and display-driven rendering. Action-driven games do not burn simulation ticks while waiting for moves. Profile the chosen runtime and document the measured capacity rather than promising unmeasured scale.
 
@@ -393,7 +393,7 @@ Fallback behavior must be explicit and recorded. A scripted fallback can keep a 
 
 Test Jev both as a challenger and as an interferer. Its strength is an empirical question; the product must tolerate valid but weak decisions and slow responses.
 
-## 10. Scores, statistics, and replay
+## 10. Scores and statistics
 
 The authoritative simulation produces raw scores and outcomes. Only validated results update leaderboards. The backend must handle repeated completion messages or retries without double-counting a result.
 
@@ -408,9 +408,9 @@ Do not sum incomparable raw scores across a mixed playlist. Use a documented pla
 
 Partition comparable leaderboards by immutable game version, relevant settings/difficulty, player count, party/interference mode, and controller category. Record keyboard versus virtual-pad input method for timing and fairness analysis; do not claim their physical precision is equivalent without testing. Guest identity does not prove a participant is human; record declared/controller type without claiming an anti-bot guarantee.
 
-Persist matches, rounds, participants, scores, duration, completion reason, controller metadata, and relevant generation provenance. Track completion rate, score distribution, replay/rematch rate, abandonment, technical failures, and generation success/repair counts. Display useful user-facing statistics without turning the gameplay UI into a diagnostics console.
+Persist matches, rounds, participants, scores, duration, completion reason, controller metadata, and relevant generation provenance. Track completion rate, score distribution, rematch rate, abandonment, technical failures, and generation success/repair counts. Display useful user-facing statistics without turning the gameplay UI into a diagnostics console.
 
-Record version/runtime hashes, initial configuration, seeds, accepted inputs, timeout/disconnect events, and controller actions. Replays use recorded actions rather than re-calling Jev. Keep secrets out of live views; replay visibility follows a documented post-round policy.
+Keep pinned version identifiers, challenge settings, participants, outcomes, points and completed-round summaries. Live runtime snapshots may be used in memory to isolate player worlds. Keep secrets out of live views and completed-match summaries.
 
 ## 11. Headless simulation and RL
 
@@ -499,7 +499,7 @@ Testing must cover mechanics, actual browser interaction, network behavior, pres
 - Verify five-button input parity across keyboard, virtual pad, and Jev; alias handling; ignored OS repeat; fast press/release edges; opposite-direction neutralization; diagonal speed; focus/cancel release; and transition suppression. Test repeated-button and sequence mechanics against known event timelines.
 - For every reference cartridge, run at least 100 seeded headless episodes spanning supported player-count boundaries and difficulty settings; record the exact coverage.
 - Test no input, random legal input, scripted input, malformed/stale input, and appropriate win/loss paths.
-- Replay recorded episodes and restore representative mid-round snapshots; compare authoritative state hashes and outcomes.
+- Restore representative mid-round snapshots inside headless tests; compare authoritative state and outcomes.
 - Verify resource limits, host-function boundaries, and recovery from nontermination or oversized output without blocking another room.
 
 ### Browser gameplay
@@ -508,7 +508,7 @@ Testing must cover mechanics, actual browser interaction, network behavior, pres
 - Exercise a win and a loss/failure path for every game, with normal UI navigation. Direct internal-state mutation is not a substitute for this test.
 - Complete at least three full mixed-game party sessions with two or more independently controlled browser clients. Include simultaneous play, rotating interference, custom roles, and transitions between real-time and action-driven games.
 - Exercise four-participant behavior using independent clients and/or clearly identified bot seats.
-- Create and follow a challenge link in a separate session, replay the pinned challenge, and verify consistent version/settings/seed policy.
+- Create and follow a challenge link in a separate session, play the pinned challenge again, and verify consistent version/settings/seed policy.
 - Check reconnect during a round, host departure, background/resume, a late join attempt, and failed asset loading. Verify documented recovery behavior.
 - Test representative desktop, small-phone portrait, and phone landscape layouts; include approximately 1440x900, 390x844, 360x640, and 844x390, or document equivalent actual viewports.
 - Inspect rendered frames for every game: instruction legibility, clipping, image transparency, target/collider agreement, score placement, and feedback. Check mute and reduced motion.
@@ -533,7 +533,7 @@ Testing must cover mechanics, actual browser interaction, network behavior, pres
 - Report decision latency distribution, request failures, stale responses, action validity, actual fallback use, model identifiers, and observed game results. Do not equate legal choices with strong play.
 - Separately test delay, failure, and stale-response behavior with fixtures, clearly labeled as simulated.
 - Run random/scripted baselines and demonstrate the Gymnasium and PettingZoo adapters stepping the same game rules.
-- Report a headless throughput measurement, replay agreement, and checks against observation/reward leakage.
+- Report a headless throughput measurement, live snapshot/restore agreement, and checks against observation/reward leakage.
 
 ### Generation benchmark
 
@@ -560,13 +560,13 @@ The implementation is complete when:
 3. All eight reference games are polished, available through the UI, operate entirely through the five-button keyboard/virtual-pad controller, and pass their gameplay checks.
 4. The creation flow generates usable code, artwork, and distinct looping retro music, dynamically compiles/loads immediately playable cartridges without rebuild/restart, supports preview/remix and independent soundtrack generation, and passes the smaller-model benchmark. Interaction sounds and music playback pass the audio checks.
 5. The engine automatically fills missing player seats with Jev and controls the required roles through real API calls on a predictable schedule, with measured behavior and honest fallback reporting.
-6. Headless execution, deterministic replay, and the documented RL adapters work against the live rules implementation.
+6. Headless execution, live state serialization, and the documented RL adapters work against the live rules implementation.
 7. Required test/playtest evidence exists, and discovered blocking defects have been fixed and rechecked.
 8. Remaining limitations are concrete, documented, and consistent with this specification. Required missing integrations are reported as incomplete, not reclassified as optional.
 
 Deliver source code, migrations, original reference-game cartridges and assets, setup/configuration instructions, a concise SDK authoring guide with examples, an architecture note describing actual implementation choices, and a playtest report.
 
-The playtest report must link each acceptance area to commands, fixtures, screenshots or replay evidence, and observed results. Include a completion matrix, browser/network coverage, provider/model details, generation measurements, and unresolved issues. Evidence should distinguish automated rule tests, browser-controlled play, scripted bots, Jev play, and genuine human sessions.
+The playtest report must link each acceptance area to commands, fixtures, screenshots or match-result evidence, and observed results. Include a completion matrix, browser/network coverage, provider/model details, generation measurements, and unresolved issues. Evidence should distinguish automated rule tests, browser-controlled play, scripted bots, Jev play, and genuine human sessions.
 
 ## 16. Suggested build sequence
 
@@ -576,7 +576,7 @@ The playtest report must link each acceptance area to commands, fixtures, screen
 4. Complete the reference library, styles, asset/audio pipeline, shared sound kit, library/challenge UI, and persistence.
 5. Integrate live code/image/music generation, including overlapping soundtrack jobs, and improve authoring ergonomics using the smaller-model benchmark.
 6. Integrate Jev and RL adapters using the same observation/action contract.
-7. Complete browser, multiplayer, latency, replay, and provider playtesting; fix defects and write the final evidence report.
+7. Complete browser, multiplayer, latency, and provider playtesting; fix defects and write the final evidence report.
 
 Refine implementation details when evidence warrants it, and document the reason. Preserve the agreed product behavior and acceptance criteria. The build sequence is guidance rather than an excuse to deliver only the first phase.
 
@@ -605,9 +605,9 @@ Add two original-art cartridges inspired by the multiplayer mechanics in WarioWa
 - **Nose Dive:** 2–4 simultaneous players launch two fingers from their colored corners toward a rotating nose. Launch travel time requires anticipation; misses recoil and briefly slow the shared nose. First clean pick wins, with same-tick ties allowed and a bounded timeout. One action button, with release between launches.
 - **Crawl for Gold:** 2–4 simultaneous crawlers race along lanes. Press at full arm extension, keep holding through the pull, then release before reaching again. Early presses, rapid taps and premature releases stumble. Seven strides win; simultaneous finishes tie. One action button; all scores and prompts stay in the cabinet.
 
-Both use original drawings, interaction cues and distinct authored retro loops. Apply the existing deterministic replay and 100-episode-per-cartridge checks. Browser inspection must include real game rendering and ordinary controller input; protocol or headless holds do not establish physical touch coverage.
+Both use original drawings, interaction cues and distinct authored retro loops. Apply live state restoration and 100-episode-per-cartridge checks. Browser inspection must include real game rendering and ordinary controller input; protocol or headless holds do not establish physical touch coverage.
 
-Jev remains an engine service. Each seat's request includes the pinned cartridge's rule source (drawing/HUD/audio declarations omitted), an optional precise public `meta.rules` rulebook, current filtered observation, visible history, own entity highlights, own HUD, held controls and simulation/cadence/latency context. Source is reference data; no model output runs as code. Decisions are bounded five-button states, with explicit fresh-press/keep-holding/release meanings. Preserve human-seat suppression, fixed opportunities, one outstanding request per seat, global concurrency, stale-response rejection, fallback labels and replayed input edges. Do not pass the raw engine snapshot, RNG seed or hidden answers. Compare live provider decisions with the former description-only request and record weak games as well as improvements.
+Jev remains an engine service. Each seat's request includes the pinned cartridge's rule source (drawing/HUD/audio declarations omitted), an optional precise public `meta.rules` rulebook, current filtered observation, visible history, own entity highlights, own HUD, held controls and simulation/cadence/latency context. Source is reference data; no model output runs as code. Decisions are bounded five-button states, with explicit fresh-press/keep-holding/release meanings. Preserve human-seat suppression, fixed opportunities, one outstanding request per seat, global concurrency, stale-response rejection, fallback labels and accepted live input edges. Do not pass the raw engine snapshot, RNG seed or hidden answers. Compare live provider decisions with the former description-only request and record weak games as well as improvements.
 
 Creation should reveal artwork as it arrives, start a ready soundtrack through the shared audio engine, then show the actual game preview and launch a newly created solo-session cartridge automatically. Respect mute, background state, Escape/options and browser audio unlock. Reopened completed jobs stay available to inspect/play; party creation adds to the current party instead of unexpectedly leaving it.
 

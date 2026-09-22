@@ -26,6 +26,6 @@ try{
  const stranger=connect(2);await until(()=>stranger.errors.length>0);assert.equal(stranger.state,null);checks.push('Late guest cannot enter an active party');
  other.send({type:'asset-error'});await until(()=>host.state.phase==='match-result');assert.match(host.state.error,/load or render/);
  const match=await api('/matches/'+host.state.matchId,guests[0].token);assert.equal(match.status,'aborted');assert.equal(match.record.rounds.length,0);assert.deepEqual(match.record.points,{});checks.push('Renderer failure during play aborts without fabricated score/result credit');
- await assert.rejects(()=>api('/matches/'+match.id,guests[2].token),/party members/);assert.equal((await api('/health')).ok,true);checks.push('Replay access remains member-only and the service survives invalid traffic');
+ await assert.rejects(()=>api('/matches/'+match.id,guests[2].token),/party members/);assert.equal((await api('/health')).ok,true);checks.push('Match summary access remains member-only and the service survives invalid traffic');
  const report={at:new Date().toISOString(),method:'Normal local HTTP/WebSocket clients sending explicitly adversarial messages; not browser input evidence.',roomId:room.id,matchId:match.id,checks,expectedErrors:errors,match};await mkdir('evidence/network',{recursive:true});await writeFile('evidence/network/protocol-boundaries.json',JSON.stringify(report,null,2));console.log(JSON.stringify({passed:true,matchId:match.id,checks}));
 }finally{for(const c of clients)c.ws.close();}

@@ -7,7 +7,7 @@ export async function ratingSummaries(store:Store):Promise<Record<string,RatingS
  return Object.fromEntries(rows.map(row=>[row.game_id,summarizeRating(row.total,row.count)]));
 }
 export async function playedRatings(store:Store,matchId:string,guestId:string){
- // Only successfully recorded rounds can be rated, including a loss. A replay or AI-only seat cannot create eligibility.
+ // Only successfully recorded rounds can be rated, including a loss. An AI-only seat cannot create eligibility.
  return store.query(`SELECT DISTINCT ON (v.game_id) v.game_id AS "gameId",r.version_id AS "versionId",v.manifest->'meta'->>'title' AS title,c.stars
   FROM results r JOIN versions v ON v.id=r.version_id LEFT JOIN cartridge_ratings c ON c.game_id=v.game_id AND c.guest_id=$2
   WHERE r.match_id=$1 AND r.guest_id=$2 AND r.record->'controllers' @> '["human"]'::jsonb

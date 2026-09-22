@@ -25,9 +25,9 @@ export class Room {
   seats:Seat[]=[];round=0;matchId='';challengeId='';startsAt=0;phaseUntil=0;creating=false;revision=0;
   private runner?:RuntimeProcess;private status:any;private views:Record<string,any>={};private busy=false;
   private last=performance.now();private accumulator=0;private lastSnapshot=0;private actionDeadline=0;private mode:Mode='native';
-  private journal:any[]=[];private rounds:any[]=[];private points:Record<string,number>={};private timer:ReturnType<typeof setInterval>;private error='';
+  private rounds:any[]=[];private points:Record<string,number>={};private timer:ReturnType<typeof setInterval>;private error='';
   private commands=Promise.resolve();private closed=false;private lastActivity=serverNow();private emptySince=serverNow();
-  private startedAt=0;private finishedAt:number|null=null;private participants:any[]=[];private definition:any;private activeRound:any=null;private checkpointAt=0;
+  private startedAt=0;private finishedAt:number|null=null;private participants:any[]=[];private definition:any;
   private termination:{kind:string;reason:string}|null=null;private rematchOf:string|null=null;
   private sequence<T>(operation:()=>T|Promise<T>):Promise<T>{const next=this.commands.then(operation);this.commands=next.then(()=>{},()=>{});return next;}
   constructor(private store:Store,hostId:string,versions:Version[],settings:unknown={},public selection?:Selection){
@@ -61,7 +61,7 @@ export class Room {
     this.lastActivity=serverNow();if(!this.seats.some(s=>s.ws))this.emptySince=this.lastActivity;
     this.broadcast();
   });}
-  private handoff(seat:Seat,controller:Seat['controller']){seat.epoch++;seat.seq=0;seat.queued.push(...buttonEdges(seat.held,emptyButtons()));seat.held=emptyButtons();seat.controller=controller;seat.history=[];seat.clock=new NetworkClock();seat.sources.add(controller);this.journal.push({type:'handoff',tick:this.status?.tick??0,player:seat.id,controller,epoch:seat.epoch});}
+  private handoff(seat:Seat,controller:Seat['controller']){seat.epoch++;seat.seq=0;seat.queued.push(...buttonEdges(seat.held,emptyButtons()));seat.held=emptyButtons();seat.controller=controller;seat.history=[];seat.clock=new NetworkClock();seat.sources.add(controller);}
   message(ws:WebSocket,message:any){return this.sequence(()=>this.handleMessage(ws,message));}
   private async handleMessage(ws:WebSocket,message:any){
     if(this.closed)return;
@@ -133,7 +133,7 @@ export class Room {
     const count=Math.max(this.settings.targetPlayers,...this.versions.map(v=>v.manifest.meta.players[0]));
     while(this.seats.length<count)this.seats.push(this.makeSeat(this.seats.length));
     this.syncBotSettings();
-    this.round=0;this.rounds=[];this.points={};this.error='';this.matchId=id();this.startedAt=serverNow();this.finishedAt=null;this.termination=null;this.activeRound=null;
+    this.round=0;this.rounds=[];this.points={};this.error='';this.matchId=id();this.startedAt=serverNow();this.finishedAt=null;this.termination=null;
     this.participants=this.seats.map(s=>({playerId:s.id,guestId:s.guestId,name:s.name,controller:s.controller}));
     const definition={versions:this.versions.map(v=>v.id),settings:this.settings,seedPolicy:'fixed',selection:this.selection??null};
     this.definition=JSON.parse(JSON.stringify(definition));
@@ -142,14 +142,14 @@ export class Room {
     try{await this.prepare();}catch(e){this.error=(e as Error).message;await this.abort('technical-failure');}
   }
   private async prepare(){
-    this.phase='preparing';this.phaseUntil=serverNow()+15000;this.runner?.dispose();this.runner=undefined;this.views={};this.status=null;this.journal=[];this.activeRound=null;
+    this.phase='preparing';this.phaseUntil=serverNow()+15000;this.runner?.dispose();this.runner=undefined;this.views={};this.status=null;
     const version=this.versions[this.round],meta=version.manifest.meta;
     await this.store.query("INSERT INTO round_attempts(match_id,round_index,version_id,status) VALUES($1,$2,$3,'preparing') ON CONFLICT DO NOTHING",[this.matchId,this.round,version.id]);
     const mode=effectiveMode(meta,this.seats.length,this.settings.mode);if(!mode)throw new Error('Playlist incompatible with participant count');this.mode=mode;
     for(const seat of this.seats){seat.loaded=!seat.ws;seat.queued=[];seat.held=emptyButtons();seat.epoch++;seat.seq=0;seat.history=[];seat.methods=new Set();seat.rejected={};seat.fallback=undefined;seat.scheduler=new DecisionScheduler(Number(process.env.JEV_INTERVAL_MS)||200);seat.sources=new Set([seat.controller]);}
     this.broadcast();this.runner=await RuntimeProcess.create(version.code,await this.store.runtime(version));
     this.status=await this.runner.call('init',{seed:(this.settings.seed+this.round)>>>0,difficulty:this.settings.difficulty,players:this.seats.map(({id,name,color})=>({id,name,color}))},this.mode);
-    await this.snapshotViews();await this.checkpoint();this.broadcast();
+    await this.snapshotViews();this.broadcast();
   }
   private async pump(){
     if(this.busy||this.closed)return;this.busy=true;
@@ -174,7 +174,6 @@ export class Room {
           if(hasInput||mono>=this.actionDeadline){const event=mono>=this.actionDeadline?'timeout':'input';await this.step(Math.min(100,(mono-this.last)/1000),event);this.last=mono;if(event==='timeout'&&this.status?.nextStepAt===undefined)this.actionDeadline=mono+10000;}
         }
         if(mono-this.lastSnapshot>=50&&this.phase==='playing'){await this.snapshotViews();this.lastSnapshot=mono;this.broadcast();}
-        if(this.phase==='playing'&&now-this.checkpointAt>=5000)await this.checkpoint();
       }else if(this.phase==='round-result'&&now>=this.phaseUntil){this.round++;if(this.round>=this.versions.length){this.phase='match-result';this.runner?.dispose();this.runner=undefined;this.finishedAt=serverNow();this.termination={kind:'complete',reason:'playlist-finished'};await this.persist('complete');this.broadcast();}else await this.prepare();}
     }catch(error){this.error=error instanceof Error?error.message:'Room failure';await this.abort('technical-failure');}
   }
@@ -183,7 +182,6 @@ export class Room {
     const tickTime=this.versions[this.round].manifest.meta.clock==='realtime'?performance.timeOrigin+this.last-this.accumulator:serverNow();
     const edges:Record<string,Edge[]>={};
     for(const s of this.seats){const ready:Edge[]=[];while(s.queued.length&&(s.queued[0].at??tickTime)<=tickTime){const {at,compensate,...edge}=s.queued.shift()!;ready.push({...edge,...(!compensate||at===undefined?{}:{age:Math.min(MAX_COMPENSATION_MS,Math.max(0,tickTime-at))/1000})});}if(ready.length)edges[s.id]=ready;}
-    if(this.versions[this.round].manifest.meta.clock==='action'||Object.keys(edges).length||event==='timeout')this.journal.push({tick:(this.status?.tick??0)+1,dt,event,edges});
     const previousRoles=this.status?.roles??{};this.status=await this.runner.call('step',edges,dt,event);
     for(const s of this.seats)if(previousRoles[s.id]!==this.status.roles[s.id]){s.epoch++;s.seq=0;s.queued=buttonEdges(s.held,emptyButtons());s.held=emptyButtons();this.actionDeadline=performance.now()+10000;}
     if(this.status.nextStepAt!==undefined)this.actionDeadline=performance.now()+Math.max(0,this.status.nextStepAt-this.status.time)*1000;
@@ -217,27 +215,20 @@ export class Room {
     }
   }
   private async finishRound(){
-    await this.snapshotViews();const version=this.versions[this.round],scores=this.status.scores,oldPoints={...this.points},saved=await this.recordRound();
+    await this.snapshotViews();const version=this.versions[this.round],scores=this.status.scores,oldPoints={...this.points};
     const records=this.seats.map(s=>{
       const score=scores[s.id]??0,better=(a:number,b:number)=>version.manifest.meta.score.order==='higher'?a>b:a<b;
       const points=this.seats.length===1?(this.status.outcomes[s.id]==='success'?3:0):this.seats.filter(o=>o.id!==s.id&&better(score,scores[o.id]??0)).length*2+this.seats.filter(o=>o.id!==s.id&&score===(scores[o.id]??0)).length;
       this.points[s.id]=(this.points[s.id]??0)+points;
       const controllers=[...s.sources].sort(),dimensions={version:version.id,difficulty:this.settings.difficulty,players:this.seats.length,mode:this.mode,controllers};return {playerId:s.id,guestId:s.guestId,name:s.name,score,points,outcome:this.status.outcomes[s.id]??'complete',durationSeconds:this.status.time,completionReason:this.status.reason,controllers,inputMethods:[...s.methods],dimensions,partition:hash(JSON.stringify(dimensions)),metrics:s.scheduler.metrics,network:{...s.clock.estimate(serverNow()),...s.clock.metrics,rejected:s.rejected}};
     });
-    saved.records=records;this.rounds.push(saved);const priorCheckpoint=this.activeRound;this.activeRound=null;
-    try{await this.store.finishRound(this.matchId,this.round,version.id,records,this.record());}catch(e){this.rounds.pop();this.points=oldPoints;this.activeRound=priorCheckpoint;throw e;}
+    this.rounds.push({versionId:version.id,mode:this.mode,durationSeconds:this.status.time,completionReason:this.status.reason,records});
+    try{await this.store.finishRound(this.matchId,this.round,version.id,records,this.record());}catch(e){this.rounds.pop();this.points=oldPoints;throw e;}
     this.phase='round-result';this.phaseUntil=serverNow()+3500;this.broadcast();
   }
-  private async recordRound(records:any[]=[]){return {versionId:this.versions[this.round].id,mode:this.mode,seed:(this.settings.seed+this.round)>>>0,config:{difficulty:this.settings.difficulty,players:this.seats.map(({id,name,color})=>({id,name,color}))},records,journal:[...this.journal],snapshot:await this.runner!.call('save'),status:this.status};}
-  private record(){return {schemaVersion:2,challengeId:this.challengeId,definition:this.definition,settings:this.settings,participants:this.participants,startedAt:this.startedAt,finishedAt:this.finishedAt,durationMs:(this.finishedAt??serverNow())-this.startedAt,termination:this.termination,rematchOf:this.rematchOf,rounds:this.rounds,activeRound:this.activeRound,points:this.points,error:this.error};}
-  private async checkpoint(){
-    if(!this.runner||!this.status||!['preparing','countdown','playing'].includes(this.phase))return;
-    const records=this.seats.map(s=>({playerId:s.id,guestId:s.guestId,name:s.name,controllers:[...s.sources],inputMethods:[...s.methods],metrics:s.scheduler.metrics,network:{...s.clock.estimate(serverNow()),...s.clock.metrics,rejected:s.rejected}}));
-    this.checkpointAt=serverNow();this.activeRound=JSON.parse(JSON.stringify({...await this.recordRound(records),index:this.round,incomplete:true,checkpointAt:this.checkpointAt}));await this.persist('playing');
-  }
+  private record(){return {schemaVersion:3,challengeId:this.challengeId,definition:this.definition,settings:this.settings,participants:this.participants,startedAt:this.startedAt,finishedAt:this.finishedAt,durationMs:(this.finishedAt??serverNow())-this.startedAt,termination:this.termination,rematchOf:this.rematchOf,rounds:this.rounds,points:this.points,error:this.error};}
   private async persist(status:string){if(this.matchId)await this.store.query('UPDATE matches SET status=$1,record=$2 WHERE id=$3',[status,JSON.stringify(this.record()),this.matchId]);}
   private async abort(reason:string,kind='technical'){
-    try{if(reason!=='technical-failure')await this.checkpoint();}catch{/* A broken worker must not erase the last durable checkpoint. */}
     this.runner?.dispose();this.runner=undefined;this.phase='match-result';this.error=this.error||reason;this.finishedAt=serverNow();this.termination={kind,reason};
     await this.store.query("UPDATE round_attempts SET status=$1,reason=$2,ended_at=now() WHERE match_id=$3 AND status IN ('preparing','playing')",[kind==='interrupted'?'interrupted':'aborted',reason,this.matchId]);
     await this.persist(kind==='interrupted'?'interrupted':'aborted');this.broadcast();

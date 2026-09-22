@@ -1,5 +1,7 @@
 # Implementation ledger
 
+> Current product scope (September 22): replay playback, recording and replay engagement were removed. Replay references below describe historical checks and evidence from earlier builds; they are not current features or runnable replay checks. Completed scores, ratings, match summaries, challenge links and live party state remain supported.
+
 Source of truth: SPEC.md and GOAL.md. This ledger records progress; it does not narrow acceptance.
 
 ## Stages

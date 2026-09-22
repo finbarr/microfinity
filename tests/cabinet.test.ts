@@ -3,7 +3,7 @@ import {defineGame,type Hud} from '../sdk/index';import {Engine} from '../runtim
 import {spatialTarget} from '../client/arcade-navigation';
 const players=[{id:'p0',name:'One',color:'#fff'},{id:'p1',name:'Two',color:'#f00'}];
 const game=defineGame({meta:{id:'hud-fixture',title:'Cabinet',description:'fixture',instruction:'Pick',players:[1,2],clock:'realtime',participation:'rotating',world:'shared',duration:10,style:'pixel',score:{unit:'points',order:'higher'},controls:{directions:true,action:'Pick'},tags:[],modifiers:['obstruction']},init(){return {secret:'never show this',turn:'p0',progress:0};},step(s,_i,ctx){s.progress++;ctx.addScore('p0',1);},observe(s,id){return {progress:s.progress,active:id};},hud(v){return {message:'Go!',activePlayerId:v.active,items:[{label:'Progress',value:v.progress}]};},draw(_v,g){g.clear('#000');}});
-test('cabinet HUD gets only the observer view, cannot mutate it, and preserves replay state',()=>{
+test('cabinet HUD gets only the observer view, cannot mutate it, and preserves live runtime state',()=>{
  let seen:any;
  const fixture={...game,hud:(view:any)=>{seen=view;assert.equal(view.secret,undefined);assert.throws(()=>{view.progress=99;},TypeError);return {activePlayerId:view.active,items:[{label:'Progress',value:view.progress}]};}};
  const engine=new Engine(fixture,{players,seed:42,difficulty:1}),before=engine.save();

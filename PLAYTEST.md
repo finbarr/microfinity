@@ -1,5 +1,7 @@
 # Playtest and acceptance report — work in progress
 
+> Current product scope (September 22): replay playback, recording and replay engagement were removed. Replay references below describe historical checks and evidence from earlier builds; they are not current features or runnable replay checks. Completed scores, ratings, match summaries, challenge links and live party state remain supported.
+
 This is an evidence ledger, not a completion claim. The full acceptance criteria in SPEC.md remain binding. No genuine human win-rate, physical-phone feel, or trained RL-policy result has been measured.
 
 ## Current evidence

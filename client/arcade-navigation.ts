@@ -42,7 +42,7 @@ export function useArcadeNavigation({screen,gameplay,onBack}:{screen:string;game
         else {
           const delta=({ArrowUp:-1,ArrowLeft:-1,KeyW:-1,KeyA:-1,ArrowDown:1,ArrowRight:1,KeyS:1,KeyD:1} as Record<string,number>)[event.code];
           // Keep keyboard selection inside the cabinet instead of opening a platform popup.
-          if(target instanceof HTMLSelectElement&&delta){event.preventDefault();const options=Array.from(target.options).filter(o=>!o.disabled),index=options.indexOf(target.selectedOptions[0]),next=options[Math.max(0,Math.min(options.length-1,index+delta))];if(next){target.value=next.value;target.dispatchEvent(new Event('change',{bubbles:true}));}return;}
+          if(target instanceof HTMLSelectElement&&delta){event.preventDefault();const options=Array.from(target.options).filter(o=>!o.disabled),index=options.indexOf(target.selectedOptions[0]),next=options[Math.max(0,Math.min(options.length-1,index+delta))];if(next){Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(target,next.value);target.dispatchEvent(new Event('change',{bubbles:true}));}return;}
           if(target instanceof HTMLInputElement&&['range','number'].includes(target.type)&&delta){
             event.preventDefault();const current=Number(target.value),step=Number(target.step)||1,low=target.min===''?-Infinity:Number(target.min),high=target.max===''?Infinity:Number(target.max);
             Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(target,String(Math.max(low,Math.min(high,current+delta*step))));target.dispatchEvent(new Event('input',{bubbles:true}));return;

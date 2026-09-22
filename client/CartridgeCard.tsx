@@ -18,7 +18,7 @@ export function CartridgeCard({game,index,selected,rating,art,onToggle,onPlay,on
         <span className="cover-caption">{meta.tags[0]?.toUpperCase()}</span>
       </div>
       <div className="card-body">
-        <div className="card-meta"><span>{meta.players[0]===meta.players[1]?meta.players[0]:`${meta.players[0]}–${meta.players[1]}`} PLAYER{meta.players[1]>1?'S':''}</span><span>{meta.duration}s</span></div>
+        <div className="card-meta"><span>SOLO + PARTY</span><span>{meta.duration}s</span></div>
         <h3>{meta.title}</h3>
         <div className="cartridge-rating">{rating?.count?<><span aria-hidden="true">★</span> {rating.average.toFixed(1)} <small>({rating.count} {rating.count===1?'rating':'ratings'})</small></>:'Not rated yet'}</div>
         {game.provenance.draft===true&&<span className="draft-badge">Draft · {game.music?'custom music':'stock soundtrack'}</span>}

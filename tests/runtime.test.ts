@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';
 import {compile,bootstrap} from '../server/compiler';import {Sandbox} from '../runtime/sandbox';import {RuntimeProcess} from '../server/runtime-process';
 const config={seed:41,difficulty:1,players:[{id:'p0',name:'Toastie',color:'#86efac'}]};
-test('compiled rules replay and restore deterministically; drawing does not consume RNG',async()=>{
+test('compiled rules step and restore deterministically; drawing does not consume RNG',async()=>{
   const source=await readFile('games/toast-catch.ts','utf8'),code=await compile(source),boot=await bootstrap();
   const a=await Sandbox.create(code,boot),b=await Sandbox.create(code,boot);
   try{a.call('init',config);b.call('init',config);

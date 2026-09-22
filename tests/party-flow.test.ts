@@ -1,8 +1,8 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,readFile,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';
-import {Store,type Version} from '../server/store';import {Room,roomRequestSchema} from '../server/rooms';
-import {compile,bootstrap} from '../server/compiler';import {Sandbox} from '../runtime/sandbox';import {ReplayRunner,canonical} from '../runtime/replay';
-
+import {Store,type Version} from '../server/store';
+import {getMatch} from '../server/matches';import {Room,roomRequestSchema} from '../server/rooms';
+import {compile,bootstrap} from '../server/compiler';import {Sandbox} from '../runtime/sandbox';
 class Socket {readyState=1;bufferedAmount=0;messages:any[]=[];send(s:string){this.messages.push(JSON.parse(s));}close(){this.readyState=3;}state(){return this.messages.filter(m=>m.type==='state').at(-1);}}
 
 test('room request contract accepts empty and existing selected/random requests without setup choices',()=>{
@@ -47,9 +47,9 @@ test('empty lobbies admit four guests, enforce host ownership, start without rea
     await room.disconnect(sockets[1] as any);assert.equal(room.seats[1].controller,'human','the replaced connection cannot disconnect the resumed seat');
     await room.disconnect(sockets[0] as any);assert.equal(room.hostId,guests[1].id);
     await assert.rejects(()=>room.message(sockets[2] as any,{type:'start'}),/Only the host/);
-    const [persisted]=await store.query('SELECT record FROM matches WHERE id=$1',[room.matchId]),round=persisted.record.activeRound;
-    const replayVm=await Sandbox.create(versions[0].code,await store.runtime(versions[0]));
-    try{const replay=new ReplayRunner(replayVm,round);assert.equal(replay.verify(),true);replayVm.call('restore',round.snapshot);assert.equal(replay.verify(),true,'JSONB key ordering does not invalidate restore');}finally{replayVm.dispose();}
+    const [persisted]=await store.query('SELECT record FROM matches WHERE id=$1',[room.matchId]);
+    assert.equal(persisted.record.participants.length,4);assert.deepEqual(persisted.record.rounds,[]);
+    assert.equal(persisted.record.activeRound,undefined);
     await room.close();
 
     const random=make(),manual=make(),a=new Socket(),b=new Socket(),c=new Socket(),d=new Socket();
@@ -62,7 +62,8 @@ test('empty lobbies admit four guests, enforce host ownership, start without rea
     await random.message(a as any,{type:'start'});
     assert.deepEqual(manual.versions.map(v=>v.id),ids);
     const rows=await store.query('SELECT record FROM matches WHERE id IN ($1,$2)',[random.matchId,manual.matchId]);
-    assert.equal(rows.length,2);assert.equal(canonical(rows[0].record.activeRound.snapshot),canonical(rows[1].record.activeRound.snapshot));
+    assert.equal(rows.length,2);assert.deepEqual(rows.map(row=>row.record.definition.versions),[ids,ids]);
+    assert.ok(rows.every(row=>row.record.activeRound===undefined));
     await random.close();await manual.close();
 
     const quick=make(),q=new Socket();await quick.join(guests[0],q as any);
@@ -73,7 +74,7 @@ test('empty lobbies admit four guests, enforce host ownership, start without rea
   }finally{await Promise.all(rooms.map(r=>r.close()));await store.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('live room inputs finish private attempts independently and persist the right guest scores and replay',async()=>{
+test('live room inputs finish private attempts independently and persist the right guest scores and summary',async()=>{
   const root=await mkdtemp(join(tmpdir(),'microfinity-party-results-')),store=new Store(root,'');let room:Room|undefined;
   const until=async(predicate:()=>boolean)=>{const end=performance.now()+8000;while(!predicate()&&performance.now()<end)await new Promise(r=>setTimeout(r,20));assert.ok(predicate(),'room reached the expected phase');};
   try{
@@ -99,7 +100,10 @@ test('live room inputs finish private attempts independently and persist the rig
     assert.deepEqual(results.map(r=>r.record.outcome),['failure','success']);assert.deepEqual(results.map(r=>r.record.points),[0,2]);
     assert.ok(results.every(r=>r.record.dimensions.mode==='party-v1'&&r.record.controllers.join(',')==='human'));
     const [match]=await store.query('SELECT record FROM matches WHERE id=$1',[room.matchId]),round=match.record.rounds[0];
-    const replayVm=await Sandbox.create(version.code,await store.runtime(version));
-    try{const replay=new ReplayRunner(replayVm,round);replay.seek(round.status.tick);assert.equal(replay.verify(),true);assert.deepEqual(replay.observe('p1').scores,{p0:1,p1:2});}finally{replayVm.dispose();}
+    assert.deepEqual(round.records.map((r:any)=>r.score),[1,2]);
+    assert.equal(round.versionId,version.id);assert.equal(round.journal,undefined);assert.equal(round.snapshot,undefined);
+    await until(()=>room!.phase==='match-result');
+    const summary=await getMatch(store,room.matchId,host.id);assert.deepEqual(summary.record.rounds[0].records.map((r:any)=>r.score),[1,2]);
+    assert.equal(summary.record.rounds[0].records[1].outcome,'success');assert.ok(!JSON.stringify(summary).includes('snapshot'));
   }finally{await room?.close();await store.close();await rm(root,{recursive:true,force:true});}
 });

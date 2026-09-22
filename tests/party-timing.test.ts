@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';
 import {compile,bootstrap} from '../server/compiler';import {Sandbox} from '../runtime/sandbox';import {emptyButtons,colors} from '../sdk/index';import {buttonEdges} from '../runtime/input';import {scriptedDecision,jevState,playerEntities} from '../server/controllers';
-for(const name of ['nose-dive','crawl-for-gold'])test(`${name}: skill wins, idle terminates, replay and same-tick ties are fair`,async()=>{
+for(const name of ['nose-dive','crawl-for-gold'])test(`${name}: skill wins, idle terminates, deterministic steps and same-tick ties are fair`,async()=>{
  const source=await readFile(`games/${name}.ts`,'utf8'),vm=await Sandbox.create(await compile(source),await bootstrap()),meta=vm.call('meta').meta;
  try{
   for(const count of [2,4])for(const difficulty of [0,3]){

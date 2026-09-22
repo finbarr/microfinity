@@ -1,16 +1,16 @@
 import {emptyButtons,type Buttons,type Edge,type Feedback,type Metadata,type Player} from '../sdk/index';
 import type {Configuration} from './engine';
 import {buttonEdges} from './input';
-import {canonical} from './replay';
 
 type Call=(method:string,...args:any[])=>any;
 type Status={tick:number;time:number;scores:Record<string,number>;outcomes:Record<string,string>;roles:Record<string,string>;done:boolean;reason:string;feedback:Feedback[];nextStepAt?:number};
 type World={players:Player[];members:{id:string;local:string}[];bots:Record<string,Buttons>;snapshot:any;status:Status;pendingDt:number;deadline:number;nextBotAt:number};
 type Saved={adapter:'party-v1';gameId:string;config:Configuration;tick:number;time:number;feedback:Feedback[];worlds:World[]};
 const clone=<T>(value:T):T=>JSON.parse(JSON.stringify(value));
+const canonical=(value:unknown):string=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
 
-/** Runs pinned cartridge runtimes unchanged. This adapter is also used by browser
- * replays; recording the mode pins its semantics independently of old runtimes.
+/** Runs pinned cartridge runtimes unchanged. Its in-memory snapshots let the
+ * live adapter switch between private worlds without losing their state.
  * A supported shared game keeps its authored world. A small legacy game gets
  * equal-seed independent attempts with local p0.. IDs and required AI opponents. */
 export class PartyRuntime {

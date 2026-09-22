@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {NetworkClock,MAX_COMPENSATION_MS} from '../server/network-clock';import {advanceInput} from '../runtime/input';import {emptyButtons,timedPress,Graphics} from '../sdk/index';import {edgeSchema} from '../runtime/validation';
-test('server-owned probes estimate skew, resist queue spikes, expire and reject replayed replies',()=>{
+test('server-owned probes estimate skew, resist queue spikes, expire and reject duplicate replies',()=>{
  const clock=new NetworkClock(),probe=clock.probe(10000)!;
  assert.equal(clock.accept('forged',1050,10100),undefined);
  const sample=clock.accept(probe.id,1050,10100)!;assert.equal(sample.rtt,100);assert.equal(sample.offset,9000);assert.equal(sample.budget,75);

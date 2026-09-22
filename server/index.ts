@@ -10,7 +10,7 @@ import { bootstrap } from './compiler';
 import { seed } from '../scripts/seed';
 import { z } from 'zod';
 import { gameStats,creationStats } from './stats';
-import {getMatch,listMatches,recordReplayPlay} from './matches';
+import {getMatch,listMatches} from './matches';
 import { GenerationService } from './generation';
 import {ratingSummaries,playedRatings,rateCartridge} from './ratings';
 import {attachSession} from './socket-session';
@@ -46,7 +46,6 @@ app.get('/api/stats/:version',async(req,res)=>{const partition=z.string().length
 app.get('/api/creation-stats',async(req,res)=>{const guest=await auth(req);res.json(await creationStats(store,guest.id));});
 app.get('/api/matches',async(req,res)=>{const guest=await auth(req);res.json(await listMatches(store,guest.id));});
 app.get('/api/matches/:id',async(req,res)=>{const guest=await auth(req);res.json(await getMatch(store,req.params.id,guest.id));});
-app.post('/api/matches/:id/replay',async(req,res)=>{const guest=await auth(req);res.json(await recordReplayPlay(store,req.params.id,guest.id));});
 const wss=new WebSocketServer({server,path:'/socket',maxPayload:16_384});
 const roomCleanup=setInterval(()=>{for(const [id,room] of rooms)if(room.isExpired()){rooms.delete(id);void room.close('room-expired').catch(e=>console.error('Room cleanup failed',e.message));}},30000);roomCleanup.unref();
 wss.on('connection',(ws,request)=>{

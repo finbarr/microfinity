@@ -9,7 +9,6 @@ CREATE INDEX IF NOT EXISTS scores_partition ON results(partition_key,score DESC)
 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, status TEXT NOT NULL, record JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS round_attempts (match_id TEXT NOT NULL REFERENCES matches(id), round_index INTEGER NOT NULL, version_id TEXT NOT NULL REFERENCES versions(id), status TEXT NOT NULL, reason TEXT, prepared_at TIMESTAMPTZ NOT NULL DEFAULT now(), started_at TIMESTAMPTZ, ended_at TIMESTAMPTZ, PRIMARY KEY(match_id,round_index));
 CREATE INDEX IF NOT EXISTS attempts_version ON round_attempts(version_id,status);
-CREATE TABLE IF NOT EXISTS replay_plays (match_id TEXT NOT NULL REFERENCES matches(id), guest_id TEXT NOT NULL REFERENCES guests(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(match_id,guest_id));
 CREATE TABLE IF NOT EXISTS cartridge_ratings (
   game_id TEXT NOT NULL REFERENCES games(id), guest_id TEXT NOT NULL REFERENCES guests(id),
   version_id TEXT NOT NULL REFERENCES versions(id), stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),

@@ -8,7 +8,7 @@ import type { Metadata, Game } from '../sdk/index';
 export const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 export const id=()=>randomBytes(12).toString('hex');
 export type Asset={name:string;hash:string;url:string;width:number;height:number;provenance?:unknown};
-export type Manifest={id:string;gameId:string;meta:Metadata;sdkVersion:string;runtimeVersion:string;runtimeUrl?:string;codeHash:string;assets:Asset[];audio?:Game['audio'];music?:unknown;provenance:Record<string,unknown>;createdAt:string};
+export type Manifest={id:string;gameId:string;meta:Metadata;sdkVersion:string;runtimeVersion:string;runtimeUrl?:string;codeHash:string;assets:Asset[];icon?:Asset;audio?:Game['audio'];music?:unknown;provenance:Record<string,unknown>;createdAt:string};
 export type Version={id:string;game_id:string;manifest:Manifest;source:string;code:string};
 export class Store {
   private db:PGlite|pg.Pool;
@@ -33,14 +33,14 @@ export class Store {
     await this.query('INSERT INTO guests(id,token_hash,name) VALUES($1,$2,$3)',[guest.id,hash(guest.token),guest.name]);return guest;
   }
   async authenticate(token:string){const [guest]=await this.query('SELECT id,name FROM guests WHERE token_hash=$1',[hash(token)]);if(!guest)throw new Error('Invalid guest session');return guest as {id:string;name:string};}
-  async putVersion(source:string,code:string,meta:Metadata,assets:Asset[]=[],music:unknown=null,provenance:Record<string,unknown>={},ownerId?:string,pinned?:{runtime:string;sdkVersion:string},audio?:Game['audio'],guard?:()=>void){
+  async putVersion(source:string,code:string,meta:Metadata,assets:Asset[]=[],music:unknown=null,provenance:Record<string,unknown>={},ownerId?:string,pinned?:{runtime:string;sdkVersion:string},audio?:Game['audio'],guard?:()=>void,icon?:Asset){
     guard?.();
     const {bootstrap}=await import('./compiler'),runtimeSource=pinned?.runtime??await bootstrap(),runtime=await this.putAsset(Buffer.from(runtimeSource),'js'),sdkVersion=pinned?.sdkVersion??'1.0.0';
     // Readiness is immutable too: fast media branches can finish before code,
     // leaving a preview with identical bytes to the subsequent publication.
     const publication=provenance.draft===true?'draft':'ready';
-    const versionId=hash(JSON.stringify({source,code,meta,assets,music,audio,publication,sdk:sdkVersion,runtime:runtime.hash}));
-    const manifest:Manifest={id:versionId,gameId:meta.id,meta,sdkVersion,runtimeVersion:runtime.hash,runtimeUrl:runtime.url,codeHash:hash(code),assets,...(audio?{audio}:{}),music,provenance,createdAt:new Date().toISOString()};
+    const versionId=hash(JSON.stringify({source,code,meta,assets,music,audio,publication,sdk:sdkVersion,runtime:runtime.hash,...(icon?{icon}:{})}));
+    const manifest:Manifest={id:versionId,gameId:meta.id,meta,sdkVersion,runtimeVersion:runtime.hash,runtimeUrl:runtime.url,codeHash:hash(code),assets,...(icon?{icon}:{}),...(audio?{audio}:{}),music,provenance,createdAt:new Date().toISOString()};
     await this.transaction(async query=>{
       guard?.();await query('INSERT INTO games(id,owner_id,title) VALUES($1,$2,$3) ON CONFLICT(id) DO NOTHING',[meta.id,ownerId??null,meta.title]);
       guard?.();await query('INSERT INTO versions(id,game_id,manifest,source,code) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING',[versionId,meta.id,JSON.stringify(manifest),source,code]);guard?.();

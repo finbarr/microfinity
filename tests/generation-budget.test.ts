@@ -6,11 +6,12 @@ import {readFile} from 'node:fs/promises';
 test('provider reservations enforce cumulative UTF-8, token, request and image bounds',()=>{
  const budget=new GenerationBudget(generationLimits({maxCalls:3,maxInputBytes:1000,maxOutputTokens:2000},{}));
  try{
-  budget.reserve({prompt:'é'.repeat(100)},1000,true);const first=structuredClone(budget.usage);assert.ok(first.inputBytes>200);
-  assert.throws(()=>budget.reserve({prompt:'x'},0,true),/one-image budget/);assert.deepEqual(budget.usage,first);
-  assert.throws(()=>budget.reserve({prompt:'é'.repeat(500)},0),/input-size budget/);assert.deepEqual(budget.usage,first);
-  assert.throws(()=>budget.reserve({},1001),/output-token budget/);assert.deepEqual(budget.usage,first);
-  budget.reserve({},1000);budget.reserve({},0);assert.throws(()=>budget.reserve({},0),/request budget/);
+  budget.reserve({prompt:'é'.repeat(100)},1000,true);assert.ok(budget.usage.inputBytes>200);
+  budget.reserve({prompt:'x'},0,true);const twoImages=structuredClone(budget.usage);
+  assert.throws(()=>budget.reserve({prompt:'x'},0,true),/two-image budget/);assert.deepEqual(budget.usage,twoImages);
+  assert.throws(()=>budget.reserve({prompt:'é'.repeat(500)},0),/input-size budget/);assert.deepEqual(budget.usage,twoImages);
+  assert.throws(()=>budget.reserve({},1001),/output-token budget/);assert.deepEqual(budget.usage,twoImages);
+  budget.reserve({},1000);assert.throws(()=>budget.reserve({},0),/request budget/);
  }finally{budget.dispose();}
  assert.throws(()=>generationLimits({}, {GENERATION_TIMEOUT_MS:'NaN'}));assert.throws(()=>generationLimits({}, {GENERATION_CODE_ATTEMPTS:'100'}));
 });

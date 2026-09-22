@@ -14,6 +14,11 @@ test('durable guest identity, immutable runtime versions, and idempotent results
     assert.equal((await store.version(draft.id)).manifest.provenance.draft,true);
     assert.notEqual(published.manifest.provenance.draft,true);
     const later=await store.putVersion(source,code,meta,[],{title:'new audio'});assert.notEqual(later.id,version.id);
+    const iconBytes=Buffer.from('icon fixture'),iconFile=await store.putAsset(iconBytes,'png'),icon={...iconFile,name:'cartridge-icon',width:256,height:256};
+    const withIcon=await store.putVersion(source,code,meta,[],null,{},guest.id,undefined,undefined,undefined,icon);
+    assert.notEqual(withIcon.id,version.id);assert.deepEqual(withIcon.manifest.icon,icon);
+    assert.equal((await store.version(version.id)).manifest.icon,undefined,'legacy immutable manifest remains untouched');
+    assert.equal((await store.putVersion(source,code,meta,[],null,{},guest.id,undefined,undefined,undefined,icon)).id,withIcon.id);
     const priorRuntime='// A previously pinned runtime\n'+await bootstrap();
     const audioOnly=await store.putVersion(source,code,meta,[],{title:'media edit'}, {},guest.id,{runtime:priorRuntime,sdkVersion:'1.0.0'});
     assert.equal(audioOnly.manifest.runtimeVersion,hash(priorRuntime));assert.equal(audioOnly.source,source);assert.equal(await store.runtime(audioOnly),priorRuntime);

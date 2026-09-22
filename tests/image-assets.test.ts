@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import sharp from 'sharp';
-import {normalizeSprite} from '../server/image-assets';
+import {normalizeSprite,normalizeIcon} from '../server/image-assets';
 
 test('sprite input limits precede decoding and normalized output is a bounded RGBA PNG',async()=>{
  await assert.rejects(()=>normalizeSprite('A'.repeat(26_666_669)),/asset limit/);
@@ -9,4 +9,11 @@ test('sprite input limits precede decoding and normalized output is a bounded RG
  const large=await sharp({create:{width:2200,height:2100,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).png().toBuffer();await assert.rejects(()=>normalizeSprite(large.toString('base64')),/pixel limit/);
  const opaque=await sharp({create:{width:32,height:32,channels:4,background:{r:100,g:20,b:10,alpha:1}}}).png().toBuffer();await assert.rejects(()=>normalizeSprite(opaque.toString('base64')),/transparent/);
  const valid=await sharp(opaque).extend({top:8,bottom:8,left:16,right:16,background:{r:0,g:0,b:0,alpha:0}}).png().toBuffer();const normalized=await normalizeSprite(valid.toString('base64'));const meta=await sharp(normalized).metadata();assert.equal(meta.width,256);assert.equal(meta.height,256);assert.equal(meta.hasAlpha,true);
+});
+
+test('cover normalization accepts opaque artwork and produces a square independent image',async()=>{
+ const opaque=await sharp({create:{width:400,height:250,channels:3,background:{r:100,g:20,b:10}}}).png().toBuffer();
+ const icon=await normalizeIcon(opaque.toString('base64')),meta=await sharp(icon).metadata();
+ assert.equal(meta.width,256);assert.equal(meta.height,256);
+ await assert.rejects(()=>normalizeSprite(opaque.toString('base64')),/transparent/);
 });

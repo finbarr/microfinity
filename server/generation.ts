@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import {normalizeSprite} from './image-assets';
+import {generateCartridgeIcon} from './cartridge-icons';
 import { readFile } from 'node:fs/promises';
 import { Store, id, hash, type Asset, type Version } from './store';
 import { compileIsolated } from './compile-process';
@@ -9,9 +10,9 @@ export {wavBuffer} from './music-assets';
 import { z } from 'zod';
 import {GenerationBudget,generationLimits,type GenerationLimits,type GenerationUsage} from './generation-budget';
 export type GameFormat={clock?:'realtime'|'action';minPlayers?:number;maxPlayers?:number};
-type Branch='brief'|'code'|'art'|'music';
+type Branch='brief'|'code'|'art'|'music'|'icon';
 export type CreationOptions={art?:boolean;remix?:string;musicOnly?:boolean;mediaOnly?:boolean;reuseMusic?:boolean;format?:GameFormat};
-export type Job={id:string;ownerId:string;prompt:string;title?:string;status:'working'|'ready'|'failed';branches:Record<Branch,string>;startedAt:number;finishedAt?:number;previewVersion?:string;previewArt?:Asset[];previewMusic?:unknown;finishedVersion?:string;error?:string;attempts:{attempt:number;error?:string;source:string}[];timings:Record<string,number>;models:Record<string,string>;usage:unknown[];brief?:any;remix?:string;musicOnly?:boolean;mediaOnly?:boolean;format?:GameFormat;reuseMusic?:boolean;musicAttempts?:{attempt:number;kind?:'score'|'audio';score?:Score;hash?:string;error?:string}[];budget?:{limits:GenerationLimits;reserved:GenerationUsage}};
+export type Job={id:string;ownerId:string;prompt:string;title?:string;status:'working'|'ready'|'failed';branches:Record<Branch,string>;startedAt:number;finishedAt?:number;previewVersion?:string;previewArt?:Asset[];previewIcon?:Asset;previewMusic?:unknown;finishedVersion?:string;error?:string;iconError?:string;attempts:{attempt:number;error?:string;source:string}[];timings:Record<string,number>;models:Record<string,string>;usage:unknown[];brief?:any;remix?:string;musicOnly?:boolean;mediaOnly?:boolean;format?:GameFormat;reuseMusic?:boolean;musicAttempts?:{attempt:number;kind?:'score'|'audio';score?:Score;hash?:string;error?:string}[];budget?:{limits:GenerationLimits;reserved:GenerationUsage}};
 const briefSchema={type:'object',properties:{title:{type:'string'},premise:{type:'string'},clock:{type:'string',enum:['realtime','action']},minPlayers:{type:'integer'},maxPlayers:{type:'integer'},style:{type:'string',enum:['pixel','cartoon','doodle','collage']},assetName:{type:'string'},assetDescription:{type:'string'},musicMood:{type:'string'}},required:['title','premise','clock','minPlayers','maxPlayers','style','assetName','assetDescription','musicMood'],additionalProperties:false};
 export class GenerationService {
   private jobs=new Map<string,Job>();private runningOwners=new Set<string>();private budgets=new Map<string,GenerationBudget>();
@@ -26,7 +27,7 @@ export class GenerationService {
     if(options.reuseMusic&&(!options.remix||options.musicOnly||options.mediaOnly))throw new Error('Reuse music is available when remixing game rules');
     if(!process.env.OPENAI_API_KEY)throw new Error('OPENAI_API_KEY is not configured');
     if(this.runningOwners.size>=2||this.runningOwners.has(ownerId))throw new Error('A creation is already running. Let it finish first.');
-    const job:Job={id:id(),ownerId,prompt,status:'working',branches:{brief:'pending',code:'pending',art:options.art===false?'skipped':'pending',music:'pending'},startedAt:Date.now(),attempts:[],timings:{},models:{},usage:[],remix:options.remix,musicOnly:options.musicOnly,mediaOnly:options.mediaOnly,format:options.format,reuseMusic:options.reuseMusic};
+    const job:Job={id:id(),ownerId,prompt,status:'working',branches:{brief:'pending',code:'pending',art:options.art===false?'skipped':'pending',music:'pending',icon:'pending'},startedAt:Date.now(),attempts:[],timings:{},models:{},usage:[],remix:options.remix,musicOnly:options.musicOnly,mediaOnly:options.mediaOnly,format:options.format,reuseMusic:options.reuseMusic};
     // Reserve before the first await: concurrent requests must count jobs whose
     // initial database write is still pending, not just running provider calls.
     this.runningOwners.add(ownerId);this.jobs.set(job.id,job);
@@ -37,7 +38,7 @@ export class GenerationService {
       // the owner locked out. Preserve a readable failure in memory and retry
       // that status once; startup recovery handles a lasting database outage.
       job.status='failed';job.finishedAt=Date.now();job.error='Creation stopped because its final status could not be saved. Any published preview remains available.';
-      for(const branch of ['brief','code','art','music'] as Branch[])if(['pending','working'].includes(job.branches[branch]))job.branches[branch]='interrupted';
+      for(const branch of ['brief','code','art','music','icon'] as Branch[])if(['pending','working'].includes(job.branches[branch]))job.branches[branch]='interrupted';
       try{await this.save(job);}catch{console.error('Could not persist creation status',job.id);}
     }).finally(()=>{budget.dispose();this.budgets.delete(job.id);this.runningOwners.delete(ownerId);this.trimJobs();});
     return this.publicJob(job);
@@ -73,11 +74,12 @@ export class GenerationService {
       if(job.reuseMusic&&!previous?.manifest.music)throw new Error('This version has no saved soundtrack to reuse');
       const gameId=previous?.manifest.gameId??`creation-${job.id.slice(0,12)}`;
       let compiled:{source:string;code:string;meta:any;audio?:any}|undefined,assets:Asset[]=(job.musicOnly||!wantArt)?previous?.manifest.assets??[]:[],music:any=job.reuseMusic?previous?.manifest.music??null:null;
-      job.previewArt=assets;if(music)job.previewMusic=music;
+      let icon:Asset|undefined=(job.musicOnly||job.mediaOnly||!wantArt)?previous?.manifest.icon:undefined;
+      job.previewArt=assets;if(music)job.previewMusic=music;if(icon)job.previewIcon=icon;
       const publish=async(final:boolean)=>{
         if(!compiled)return;
         budget.check();
-        const version=await this.store.putVersion(compiled.source,compiled.code,compiled.meta,assets,music,{kind:previous?.manifest.provenance.kind==='reference'&&(job.musicOnly||job.mediaOnly)?'reference':'generated',jobId:job.id,brief,models:job.models,promptHash:hash(job.prompt),draft:!final,art:job.branches.art,music:job.branches.music},job.ownerId,previous&&(job.musicOnly||job.mediaOnly)?{runtime:await work(()=>this.store.runtime(previous)),sdkVersion:previous.manifest.sdkVersion}:undefined,compiled.audio,()=>budget.check());
+        const version=await this.store.putVersion(compiled.source,compiled.code,compiled.meta,assets,music,{kind:previous?.manifest.provenance.kind==='reference'&&(job.musicOnly||job.mediaOnly)?'reference':'generated',jobId:job.id,brief,models:job.models,promptHash:hash(job.prompt),draft:!final,art:job.branches.art,music:job.branches.music,icon:job.branches.icon},job.ownerId,previous&&(job.musicOnly||job.mediaOnly)?{runtime:await work(()=>this.store.runtime(previous)),sdkVersion:previous.manifest.sdkVersion}:undefined,compiled.audio,()=>budget.check(),icon);
         if(!job.previewVersion)job.timings.previewMs=Date.now()-job.startedAt;
         job.previewVersion=version.id;
         if(final){job.finishedVersion=version.id;job.status='ready';job.finishedAt=Date.now();job.timings.totalMs=job.finishedAt-job.startedAt;}
@@ -107,6 +109,14 @@ export class GenerationService {
         const asset=await work(()=>this.store.putAsset(bytes,'png'));assets=[{...asset,name:brief.assetName,width:256,height:256,provenance:{model:imageModel,kind:'image-model',jobId:job.id}}];
         job.previewArt=assets;job.models.image=imageModel;job.usage.push({branch:'image',usage:(result as any).usage??null});job.branches.art='ready';job.timings.artEnd=Date.now();await work(()=>this.save(job));
       })();
+      const iconTask=(async()=>{
+        if(icon){job.branches.icon='reused';await work(()=>this.save(job));return;}
+        if(job.musicOnly){job.branches.icon='skipped';await work(()=>this.save(job));return;}
+        job.branches.icon='working';job.timings.iconStart=Date.now();await work(()=>this.save(job));
+        const subject=job.mediaOnly&&previous?{title:previous.manifest.meta.title,premise:previous.manifest.meta.description,rules:previous.manifest.meta.rules,style:previous.manifest.meta.style}:{title:brief.title,premise:brief.premise,rules:job.prompt,style:brief.style};
+        const result=await work(()=>generateCartridgeIcon(this.store,subject,{signal:budget.signal,reserve:(body,tokens,image)=>budget.reserve(body,tokens,image),jobId:job.id,fetch:this.providerFetch}));
+        icon=result.icon;job.previewIcon=icon;job.models.icon=result.model;job.usage.push({branch:'icon',model:result.model,usage:result.usage});job.branches.icon='ready';job.timings.iconEnd=Date.now();await work(()=>this.save(job));
+      })();
       const musicTask=(async()=>{
         if(job.reuseMusic){job.branches.music='reused';await work(()=>this.save(job));return;}
         job.branches.music='working';job.timings.musicStart=Date.now();await work(()=>this.save(job));
@@ -129,10 +139,11 @@ export class GenerationService {
         music={...asset,...rendered.metadata,provenance:{...rendered.metadata.provenance,jobId:job.id}};
         job.previewMusic=music;job.branches.music='ready';job.timings.musicEnd=Date.now();await work(()=>this.save(job));
       })();
-      const branches=await Promise.allSettled([codeTask,artTask,musicTask]);for(let i=0;i<branches.length;i++)if(branches[i].status==='rejected'){job.branches[(['code','art','music'] as Branch[])[i]]='failed';}
-      const failures=branches.filter(r=>r.status==='rejected') as PromiseRejectedResult[];if(failures.length&&compiled)await publish(false);if(failures.length)throw new Error(failures.map(f=>f.reason.message).join('; '));
+      const branches=await Promise.allSettled([codeTask,artTask,musicTask,iconTask]);for(let i=0;i<branches.length;i++)if(branches[i].status==='rejected'){job.branches[(['code','art','music','icon'] as Branch[])[i]]='failed';}
+      if(branches[3].status==='rejected')job.iconError=(branches[3].reason as Error).message.slice(0,500);
+      const failures=branches.slice(0,3).filter(r=>r.status==='rejected') as PromiseRejectedResult[];if(failures.length&&compiled)await publish(false);if(failures.length)throw new Error(failures.map(f=>f.reason.message).join('; '));
       await publish(true);
-    }catch(e){job.status='failed';for(const branch of ['brief','code','art','music'] as Branch[])if(job.branches[branch]==='working')job.branches[branch]='failed';else if(job.branches[branch]==='pending')job.branches[branch]='not started';job.error=(budget.signal.aborted?budget.signal.reason:e as Error).message.slice(0,2000);job.finishedAt=Date.now();job.timings.totalMs=job.finishedAt-job.startedAt;}
+    }catch(e){job.status='failed';for(const branch of ['brief','code','art','music','icon'] as Branch[])if(job.branches[branch]==='working')job.branches[branch]='failed';else if(job.branches[branch]==='pending')job.branches[branch]='not started';job.error=(budget.signal.aborted?budget.signal.reason:e as Error).message.slice(0,2000);job.finishedAt=Date.now();job.timings.totalMs=job.finishedAt-job.startedAt;}
     finally{budget.dispose();await this.save(job);}
   }
 }

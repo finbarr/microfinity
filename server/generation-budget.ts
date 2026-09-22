@@ -2,7 +2,7 @@ import {z} from 'zod';
 
 const limitsSchema=z.object({
   timeoutMs:z.coerce.number().int().min(1000).max(900000).default(300000),
-  maxCalls:z.coerce.number().int().min(1).max(16).default(7),
+  maxCalls:z.coerce.number().int().min(1).max(16).default(8),
   maxInputBytes:z.coerce.number().int().min(1000).max(1000000).default(300000),
   maxOutputTokens:z.coerce.number().int().min(1000).max(200000).default(54000),
   codeAttempts:z.coerce.number().int().min(1).max(3).default(3),
@@ -33,7 +33,7 @@ export class GenerationBudget {
     if(next.calls>this.limits.maxCalls)throw new Error('Creation reached its provider request budget');
     if(next.inputBytes>this.limits.maxInputBytes)throw new Error('Creation reached its provider input-size budget');
     if(next.reservedOutputTokens>this.limits.maxOutputTokens)throw new Error('Creation reached its provider output-token budget');
-    if(next.images>1)throw new Error('Creation reached its one-image budget');
+    if(next.images>2)throw new Error('Creation reached its two-image budget');
     Object.assign(this.usage,next);
   }
   async run<T>(operation:()=>Promise<T>|T):Promise<T>{

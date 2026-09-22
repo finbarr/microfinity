@@ -2,28 +2,30 @@ import test from 'node:test';import assert from 'node:assert/strict';import {rea
 import {GenerationService} from '../server/generation';import {stockScore} from '../runtime/music';import {hash, type Store} from '../server/store';
 import type {GenerationLimits} from '../server/generation-budget';
 import type {MusicGenerationAdapter,MusicOutput} from '../server/music-generation';
+import sharp from 'sharp';
 const pause=()=>new Promise(r=>setTimeout(r,5));
 async function until(check:()=>any){const start=Date.now();while(!check()){if(Date.now()-start>25000)throw new Error('Fixture job did not settle');await pause();}}
 function fixture(limits:Partial<GenerationLimits>={},providerFetch?:typeof fetch,musicProvider?:MusicGenerationAdapter){
  const sourceMusic={hash:'old-music',score:stockScore('toast-catch'),provenance:{model:'fixture-only'}};
  const original={id:'original',manifest:{gameId:'toast-catch',sdkVersion:'1.0.0',meta:{id:'toast-catch',title:'Toast Catch',description:'Fixture',clock:'realtime',players:[1,1]},assets:[{name:'toast',hash:'original-art'}],audio:{music:'main-loop',soundPack:'soft-toy'},music:sourceMusic,provenance:{}},source:'original-source',code:'original-code'};
  const records:any[]=[],versions:any[]=[],queries:any[]=[];
- const store={async query(_sql:string,params:any[]){queries.push(params);if(params[3]){records.push(JSON.parse(params[3]));return [];}const record=[...records].reverse().find(r=>r.id===params[0]&&r.ownerId===params[1]);return record?[{record:structuredClone(record)}]:[];},async version(id:string){return id==='original'?original:versions.find(v=>v.id===id);},async runtime(){return 'original-runtime';},async putAsset(bytes:Buffer){return {hash:hash(bytes),url:`/assets/${hash(bytes)}.wav`};},async putVersion(source:any,code:any,meta:any,assets:any,music:any,provenance:any,_owner:any,pinned:any,audio:any,guard?:()=>void){guard?.();const id=`version-${versions.length}`;const v={id,source,code,pinned,manifest:{meta,assets,music,provenance,audio}};versions.push(structuredClone(v));return v;}};
- const service=new GenerationService(store as unknown as Store,limits,providerFetch,musicProvider);
+ const store={async query(_sql:string,params:any[]){queries.push(params);if(params[3]){records.push(JSON.parse(params[3]));return [];}const record=[...records].reverse().find(r=>r.id===params[0]&&r.ownerId===params[1]);return record?[{record:structuredClone(record)}]:[];},async version(id:string){return id==='original'?original:versions.find(v=>v.id===id);},async runtime(){return 'original-runtime';},async putAsset(bytes:Buffer){return {hash:hash(bytes),url:`/assets/${hash(bytes)}.png`};},async putVersion(source:any,code:any,meta:any,assets:any,music:any,provenance:any,_owner:any,pinned:any,audio:any,guard?:()=>void,icon?:any){guard?.();const id=`version-${versions.length}`;const v={id,source,code,pinned,manifest:{meta,assets,music,provenance,audio,...(icon?{icon}:{})}};versions.push(structuredClone(v));return v;}};
+ const noExternalImages=(async()=>new Response(JSON.stringify({error:{message:'fixture image unavailable',type:'server_error'}}),{status:500,headers:{'content-type':'application/json'}})) as typeof fetch;
+ const service=new GenerationService(store as unknown as Store,limits,providerFetch??noExternalImages,musicProvider);
  const brief={title:'Toast Catch',premise:'Catch toast',clock:'realtime',minPlayers:1,maxPlayers:1,style:'cartoon',assetName:'toast',assetDescription:'Toast',musicMood:'playful'};
  return {service,store,records,versions,original,brief};
 }
 test('pending soundtrack leaves an immutable draft; final publication has atomic ready status',async()=>{
  const key=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='fixture-only';
  try{
-  const f=fixture();let resolveMusic!:(s:any)=>void;
+  const f=fixture();(f.original.manifest as any).icon={name:'cartridge-icon',hash:'original-icon',url:'/assets/original-icon.png',width:256,height:256};let resolveMusic!:(s:any)=>void;
   (f.service as any).json=async(_j:any,_m:any,branch:string)=>branch==='brief'?f.brief:new Promise(r=>resolveMusic=r);
   const job=await f.service.create('owner','Give this loop a new soft melody',{remix:'original',musicOnly:true});
   await until(()=>f.versions.length===1&&resolveMusic);const draft=structuredClone(f.versions[0]);
-  assert.equal(draft.manifest.music,null);assert.equal(draft.manifest.provenance.draft,true);
+  assert.equal(draft.manifest.music,null);assert.equal(draft.manifest.provenance.draft,true);assert.deepEqual(draft.manifest.icon,(f.original.manifest as any).icon);
   assert.equal((await f.service.get(job.id,'owner')).status,'working');assert.equal(draft.pinned.runtime,'original-runtime');
   resolveMusic(stockScore('toast-catch'));await until(()=>f.records.at(-1)?.status==='ready');
-  const final=f.versions.at(-1);assert.notEqual(final.id,draft.id);assert.ok(final.manifest.music.hash);assert.equal(final.source,f.original.source);assert.deepEqual(final.manifest.assets,f.original.manifest.assets);
+  const final=f.versions.at(-1);assert.notEqual(final.id,draft.id);assert.ok(final.manifest.music.hash);assert.equal(final.source,f.original.source);assert.deepEqual(final.manifest.assets,f.original.manifest.assets);assert.deepEqual(final.manifest.icon,(f.original.manifest as any).icon);
   assert.deepEqual(f.versions[0],draft);assert.ok(f.records.filter(r=>r.finishedVersion).every(r=>r.status==='ready'));
  }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
 });
@@ -144,5 +146,73 @@ test('ready music and artwork are exposed while code is still being created',asy
   const progress=await f.service.get(job.id,'owner');assert.equal(progress.status,'working');assert.equal(progress.previewVersion,undefined);assert.deepEqual(progress.previewArt,f.original.manifest.assets);assert.ok((progress.previewMusic as any).url);assert.equal(progress.branches.music,'ready');
   finishCode({source:await readFile('games/toast-catch.ts','utf8')});await until(()=>f.records.at(-1)?.status!=='working');assert.equal(f.records.at(-1).status,'ready',f.records.at(-1).error);
   assert.deepEqual(f.versions.at(-1).manifest.music,progress.previewMusic);
+ }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
+});
+
+test('media refresh requests a distinct cover image and gameplay sprite, then publishes both',async()=>{
+ const key=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='fixture-only';
+ try{
+  const sprite=await sharp({create:{width:24,height:24,channels:4,background:{r:220,g:80,b:30,alpha:1}}}).extend({top:20,bottom:20,left:20,right:20,background:{r:0,g:0,b:0,alpha:0}}).png().toBuffer();
+  const cover=await sharp({create:{width:80,height:80,channels:3,background:{r:30,g:80,b:180}}}).png().toBuffer();
+  const prompts:string[]=[];
+  const fetcher=(async(_url:any,init:any)=>{const body=JSON.parse(String(init.body));prompts.push(body.prompt);const bytes=body.prompt.startsWith('One original game sprite')?sprite:cover;return new Response(JSON.stringify({created:1,data:[{b64_json:bytes.toString('base64')}],usage:{input_tokens:1}}),{headers:{'content-type':'application/json'}});}) as typeof fetch;
+  const f=fixture({},fetcher);(f.service as any).json=async(_j:any,_m:any,branch:string)=>branch==='brief'?f.brief:stockScore('toast-catch');
+  const job=await f.service.create('owner','Refresh the art and music for this existing game',{remix:'original',mediaOnly:true});
+  await until(()=>f.records.at(-1)?.status!=='working');const done=await f.service.get(job.id,'owner');
+  assert.equal(done.status,'ready',done.error??'Unexpected failure');assert.equal(done.branches.icon,'ready');assert.equal(done.budget?.reserved.images,2);assert.equal(prompts.length,2);
+  assert.ok(prompts.some(p=>p.includes('game sprite')));assert.ok(prompts.some(p=>p.includes('square cover illustration')));
+  const final=f.versions.at(-1);assert.ok(final.manifest.icon);assert.equal(final.manifest.icon.name,'cartridge-icon');
+  assert.notEqual(final.manifest.icon.hash,final.manifest.assets[0].hash);assert.deepEqual(done.previewIcon,final.manifest.icon);
+  assert.equal(final.source,f.original.source);assert.equal(final.pinned.runtime,'original-runtime');
+ }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
+});
+
+test('a new game starts a playable draft while its dedicated icon is still pending',async()=>{
+ const key=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='fixture-only';
+ try{
+  const source=await readFile('games/toast-catch.ts','utf8');
+  const sprite=await sharp({create:{width:24,height:24,channels:4,background:{r:220,g:80,b:30,alpha:1}}}).extend({top:20,bottom:20,left:20,right:20,background:{r:0,g:0,b:0,alpha:0}}).png().toBuffer();
+  const cover=await sharp({create:{width:80,height:80,channels:3,background:{r:30,g:80,b:180}}}).png().toBuffer();
+  let finishIcon!:(response:Response)=>void;
+  const requests:string[]=[];
+  const fetcher=(async(_url:any,init:any)=>{const body=JSON.parse(String(init.body));requests.push(body.prompt);if(body.prompt.includes('square cover illustration'))return new Promise<Response>(resolve=>finishIcon=resolve);return new Response(JSON.stringify({created:1,data:[{b64_json:sprite.toString('base64')}]}),{headers:{'content-type':'application/json'}});}) as typeof fetch;
+  const f=fixture({},fetcher);
+  (f.service as any).json=async(job:any,_model:any,branch:string)=>branch==='brief'?f.brief:branch==='cartridge'?{source:source.replace("id:'toast-catch'",`id:'creation-${job.id.slice(0,12)}'`)}:stockScore('toast-catch');
+  const job=await f.service.create('owner','Make a fast breakfast catching microgame');
+  await until(()=>f.versions.length===1&&finishIcon);const draft=structuredClone(f.versions[0]);
+  assert.equal(draft.manifest.provenance.draft,true);assert.equal(draft.manifest.icon,undefined);
+  assert.equal((await f.service.get(job.id,'owner')).branches.icon,'working');
+  finishIcon(new Response(JSON.stringify({created:1,data:[{b64_json:cover.toString('base64')}]}),{headers:{'content-type':'application/json'}}));
+  await until(()=>f.records.at(-1)?.status!=='working');const done=await f.service.get(job.id,'owner');
+  assert.equal(done.status,'ready',done.error??'Unexpected failure');assert.equal(done.branches.icon,'ready');assert.equal(requests.length,2);
+  assert.ok(f.versions.at(-1).manifest.icon);assert.notEqual(f.versions.at(-1).manifest.icon.hash,f.versions.at(-1).manifest.assets[0].hash);
+  assert.deepEqual(f.versions[0],draft);
+ }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
+});
+
+test('an icon provider failure keeps an icon-less game playable and records branch failure',async()=>{
+ const key=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='fixture-only';
+ try{
+  const fetcher=(async()=>new Response(JSON.stringify({error:{message:'fixture icon failure',type:'server_error'}}),{status:500,headers:{'content-type':'application/json'}})) as typeof fetch;
+  const f=fixture({},fetcher);(f.service as any).json=async(_j:any,_m:any,branch:string)=>branch==='brief'?f.brief:stockScore('toast-catch');
+  const job=await f.service.create('owner','Refresh the media of this existing game',{remix:'original',mediaOnly:true,art:false});
+  await until(()=>f.records.at(-1)?.status!=='working');const done=await f.service.get(job.id,'owner');
+  assert.equal(done.status,'ready',done.error??'Unexpected failure');assert.equal(done.branches.icon,'failed');assert.match(done.iconError!,/fixture icon failure/);
+  assert.ok(done.previewVersion);assert.ok(done.finishedVersion);assert.equal(f.versions.at(-1).manifest.icon,undefined);
+ }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
+});
+
+test('an expired icon request cannot publish late output after a playable preview',async()=>{
+ const key=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='fixture-only';
+ try{
+  let finish!:(value:Response)=>void,signal:AbortSignal|undefined;
+  const fetcher=(async(_url:any,init:any)=>{signal=init.signal;return new Promise<Response>(resolve=>finish=resolve);}) as typeof fetch;
+  const f=fixture({timeoutMs:1000},fetcher);(f.service as any).json=async(_j:any,_m:any,branch:string)=>branch==='brief'?f.brief:stockScore('toast-catch');
+  const job=await f.service.create('owner','Refresh this fixture without sprite art',{remix:'original',mediaOnly:true,art:false});
+  await until(()=>f.versions.length===1&&finish);const preview=structuredClone(f.versions[0]);
+  await until(()=>f.records.at(-1)?.status==='failed');assert.equal(signal?.aborted,true);
+  const png=await sharp({create:{width:32,height:32,channels:3,background:'#445566'}}).png().toBuffer();
+  finish(new Response(JSON.stringify({created:1,data:[{b64_json:png.toString('base64')}]}),{headers:{'content-type':'application/json'}}));await new Promise(r=>setTimeout(r,30));
+  assert.equal(f.versions.length,1);assert.deepEqual(f.versions[0],preview);assert.equal((await f.service.get(job.id,'owner')).finishedVersion,undefined);
  }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
 });

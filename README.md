@@ -26,7 +26,9 @@ npm start
 
 `npm start` explicitly selects production mode and serves `dist/client`; `npm run dev` enables Vite and hot reload. Keep the repository source and `server/migrations` alongside the production build: runtime compilation reads the SDK type declarations. Assets, the local database, versions, challenges, and results are stored under `data/`; set `DATA_DIR` to use another directory. Stop the server before opening, moving or copying its PGlite database from another process. A restart ends active rooms. Completed scores and member-only recordings survive, including the last saved checkpoint of an unfinished round. An unfinished round receives no final score; persisted challenges can be started again.
 
-Creation limits are configurable with the `GENERATION_*` settings in `.env.example`. Defaults provide five minutes of work after durable admission, seven provider calls, 300 KB of cumulative request bodies, 54,000 reserved output tokens and one image. Existing draft previews survive deadline failures. These bound provider work, not exact dollar charges; actual returned usage is retained. Finished jobs remain in the database, with only the latest 32 cached in memory.
+Creation limits are configurable with the `GENERATION_*` settings in `.env.example`. Defaults provide five minutes of work after durable admission, eight provider calls, 300 KB of cumulative request bodies, 54,000 reserved output tokens and two images (one gameplay sprite and one cartridge cover). Existing draft previews survive deadline failures. These bound provider work, not exact dollar charges; actual returned usage is retained. Finished jobs remain in the database, with only the latest 32 cached in memory.
+
+To add covers to older local cartridges, run `node --import tsx scripts/backfill-cartridge-icons.ts --data-dir PATH --dry-run`, then rerun without `--dry-run`. Each run processes at most ten icon-less games by default; `--limit N` accepts 1–100 and `--game-id ID` targets one. The command reads the root `.env`, uses bundled covers for reference games, and requests image-model covers for other games. It publishes an icon-only successor with pinned code, runtime and media; prior versions, scores, ratings and replays stay intact. The explicit data path always selects local PGlite rather than an external `DATABASE_URL`.
 
 ## Play
 
@@ -37,7 +39,7 @@ Creation limits are configurable with the `GENERATION_*` settings in `.env.examp
 - Gameplay: WASD or arrow keys plus Space. Phones use the same logical buttons on a digital pad.
 - Toast Catch supports reusable independent races, obstruction, and pressure modes. Other cartridges have their own declared arrangements.
 - Use **Make a game for this party** to keep friends connected while creating, then add the finished version to the queue.
-- Use **Make a game** for a natural-language prompt. Code, artwork, and music generate in separate branches. A valid draft can be played while assets are pending; finished media creates a new immutable version.
+- Use **Make a game** for a natural-language prompt. Code, gameplay artwork, a cartridge cover, and music generate in separate branches. A valid draft can be played while assets are pending; finished media creates a new immutable version.
 
 Jev uses only filtered player observations. Its current fallback is a clearly recorded scripted baseline when requests fail; legal decisions do not establish strong play. The first provider probe is recorded in `evidence/provider-probe.json`.
 

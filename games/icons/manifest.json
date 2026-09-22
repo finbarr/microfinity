@@ -1,0 +1,87 @@
+{
+  "model": "gpt-image-1.5",
+  "width": 256,
+  "height": 256,
+  "icons": {
+    "conveyor-clash": {
+      "file": "conveyor-clash.png",
+      "model": "gpt-image-1.5",
+      "prompt": "A dedicated square cartridge-cover illustration for a tiny playful retro arcade game. Printed-label pixel-cartoon art with chunky pixel edges, bold clean outlines, a limited vivid palette, simple readable shapes, and a filled background. Compose one clear scene that still reads at small icon size. No words, letters, numbers, logos, watermark, frame, collage, or recognizable copyrighted character.\nScene: A comic factory conveyor with three colorful lanes carrying square parcels, one gloved hand ready to catch a parcel, warm machinery and playful motion.",
+      "width": 256,
+      "height": 256,
+      "sha256": "e090bb5ae8cfbaa71c2bd23de1543c241d7413e1e5de417716ed77bce70bb049"
+    },
+    "asteroid-scramble": {
+      "file": "asteroid-scramble.png",
+      "model": "gpt-image-1.5",
+      "prompt": "A dedicated square cartridge-cover illustration for a tiny playful retro arcade game. Printed-label pixel-cartoon art with chunky pixel edges, bold clean outlines, a limited vivid palette, simple readable shapes, and a filled background. Compose one clear scene that still reads at small icon size. No words, letters, numbers, logos, watermark, frame, collage, or recognizable copyrighted character.\nScene: A little cream-and-coral rocket weaving through three chunky violet asteroids in a deep teal starfield, diagonal action, tiny bright shot streaks.",
+      "width": 256,
+      "height": 256,
+      "sha256": "a669ac87d5d45c3e8f14ecd426aaf16ad1c3d5832930ac42fb639d2176334b4a"
+    },
+    "cup-shuffle": {
+      "file": "cup-shuffle.png",
+      "model": "gpt-image-1.5",
+      "prompt": "A dedicated square cartridge-cover illustration for a tiny playful retro arcade game. Printed-label pixel-cartoon art with chunky pixel edges, bold clean outlines, a limited vivid palette, simple readable shapes, and a filled background. Compose one clear scene that still reads at small icon size. No words, letters, numbers, logos, watermark, frame, collage, or recognizable copyrighted character.\nScene: Three expressive upside-down carnival cups on a plum stage, one lime-green pea peeking from beneath the center cup, theatrical spotlight and playful shuffle swooshes.",
+      "width": 256,
+      "height": 256,
+      "sha256": "5dc7045ed08d16165f354da2aa3d5307c15a8c91a5998650e658dfe79ae7d784"
+    },
+    "crawl-for-gold": {
+      "file": "crawl-for-gold.png",
+      "model": "gpt-image-1.5",
+      "prompt": "A dedicated square cartridge-cover illustration for a tiny playful retro arcade game. Printed-label pixel-cartoon art with chunky pixel edges, bold clean outlines, a limited vivid palette, simple readable shapes, and a filled background. Compose one clear scene that still reads at small icon size. No words, letters, numbers, logos, watermark, frame, collage, or recognizable copyrighted character.\nScene: A determined tiny pajama crawler stretching one long arm toward a gleaming golden trophy at the end of a warm sandy lane; make the crawler and trophy the clear focal points.",
+      "width": 256,
+      "height": 256,
+      "sha256": "f84b3012c4553fabf262ca4a79588093e243a917024c4a7cbd0402030ff29834"
+    },
+    "nose-dive": {
+      "file": "nose-dive.png",
+      "model": "gpt-image-1.5",
+      "prompt": "A dedicated square cartridge-cover illustration for a tiny playful retro arcade game. Printed-label pixel-cartoon art with chunky pixel edges, bold clean outlines, a limited vivid palette, simple readable shapes, and a filled background. Compose one clear scene that still reads at small icon size. No words, letters, numbers, logos, watermark, frame, collage, or recognizable copyrighted character.\nScene: A silly rosy nose spinning at center while two colorful pairs of tiny fingers reach inward from opposite edges, sunny yellow backdrop, funny timing-game energy.",
+      "width": 256,
+      "height": 256,
+      "sha256": "91e92a7d222360f82d693751545e0dc7deb907c208643e6d212a43ed29f2d31a"
+    },
+    "odd-snack-out": {
+      "file": "odd-snack-out.png",
+      "model": "gpt-image-1.5",
+      "prompt": "A dedicated square cartridge-cover illustration for a tiny playful retro arcade game. Printed-label pixel-cartoon art with chunky pixel edges, bold clean outlines, a limited vivid palette, simple readable shapes, and a filled background. Compose one clear scene that still reads at small icon size. No words, letters, numbers, logos, watermark, frame, collage, or recognizable copyrighted character.\nScene: Six identical round golden frosted snack faces, same shape, same pale pink frosting, same expression, same size, arranged in a tidy three-by-two grid on a pastel bakery counter. Exactly five snacks each have three large clearly separated dark sprinkles; exactly one snack has only two. Do not vary any other feature between snacks. The sprinkle-count difference must be immediately countable.",
+      "width": 256,
+      "height": 256,
+      "sha256": "3e8966b621a22eaa821c614c05eccd8a5d1e905046146ab11bf906cfe99c6273"
+    },
+    "patchwork-pass": {
+      "file": "patchwork-pass.png",
+      "model": "gpt-image-1.5",
+      "prompt": "A dedicated square cartridge-cover illustration for a tiny playful retro arcade game. Printed-label pixel-cartoon art with chunky pixel edges, bold clean outlines, a limited vivid palette, simple readable shapes, and a filled background. Compose one clear scene that still reads at small icon size. No words, letters, numbers, logos, watermark, frame, collage, or recognizable copyrighted character.\nScene: A cozy overhead view of a shared patchwork quilt with bold geometric stitched pieces, one bright piece being placed into an open grid, craft-table warmth and thread details.",
+      "width": 256,
+      "height": 256,
+      "sha256": "323ba1706b3fc725a451a548de3613e60d40d3b6e32e411a724384a48baaeff7"
+    },
+    "skill-continue": {
+      "file": "skill-continue.png",
+      "model": "gpt-image-1.5",
+      "prompt": "A dedicated square cartridge-cover illustration for a tiny playful retro arcade game. Printed-label pixel-cartoon art with chunky pixel edges, bold clean outlines, a limited vivid palette, simple readable shapes, and a filled background. Compose one clear scene that still reads at small icon size. No words, letters, numbers, logos, watermark, frame, collage, or recognizable copyrighted character.\nScene: A glowing mint timing zone with a bright white pulse crossing it, two small arcade relay batons passing between colorful player hands, dark indigo cabinet-like atmosphere.",
+      "width": 256,
+      "height": 256,
+      "sha256": "bc1a9942447cf41210a006855724bb4bf6e2302ef3a2566dffc3e50d7ddd0214"
+    },
+    "umbrella-panic": {
+      "file": "umbrella-panic.png",
+      "model": "gpt-image-1.5",
+      "prompt": "A dedicated square cartridge-cover illustration for a tiny playful retro arcade game. Printed-label pixel-cartoon art with chunky pixel edges, bold clean outlines, a limited vivid palette, simple readable shapes, and a filled background. Compose one clear scene that still reads at small icon size. No words, letters, numbers, logos, watermark, frame, collage, or recognizable copyrighted character.\nScene: A small lavender umbrella sheltering a childlike figure while golden stars and a few red storm drops fall from a whimsical blue raincloud, playful rainy-day scene.",
+      "width": 256,
+      "height": 256,
+      "sha256": "f12f2d9c0489468cdb4b354d0a7e174edc8ac207e8541133de49169a342a795f"
+    },
+    "toast-catch": {
+      "file": "toast-catch.png",
+      "model": "gpt-image-1.5",
+      "prompt": "A dedicated square cartridge-cover illustration for a tiny playful retro arcade game. Printed-label pixel-cartoon art with chunky pixel edges, bold clean outlines, a limited vivid palette, simple readable shapes, and a filled background. Compose one clear scene that still reads at small icon size. No words, letters, numbers, logos, watermark, frame, collage, or recognizable copyrighted character.\nScene: A smiling golden toast slice falling toward a waiting little hand over a cheerful breakfast kitchen counter, buttery orange and sky-blue colors.",
+      "width": 256,
+      "height": 256,
+      "sha256": "31faccbac81373396a7500f165698f4620af514ed760be578fbb144ea5db7030"
+    }
+  }
+}

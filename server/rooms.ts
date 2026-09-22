@@ -11,6 +11,7 @@ import { DecisionScheduler, jevDecision, scriptedDecision } from './controllers'
 import {selectPlaylist,randomSchema,type Selection} from './playlists';
 import {NetworkClock, serverNow, MAX_COMPENSATION_MS} from './network-clock';
 import {effectiveMode,participantCounts,type BotType} from '../shared/party';
+import {COUNTDOWN_MS} from '../shared/countdown';
 type QueuedEdge=Edge & {at?:number;compensate?:boolean};
 
 export const settingsSchema=z.object({targetPlayers:z.number().int().min(1).max(4).default(1),botType:z.enum(['jev','scripted']).default('jev'),botTypes:z.array(z.enum(['jev','scripted'])).max(4).default([]),mode:z.enum(['native','race','obstruction','pressure']).default('native'),difficulty:z.number().int().min(0).max(3).default(1),seed:z.number().int().min(0).max(4294967295).default(()=>randomBytes(4).readUInt32LE())});
@@ -112,7 +113,7 @@ export class Room {
       const edges=z.array(edgeSchema).max(32).parse(message.edges);if(seat.queued.length+edges.length>64)return;
       seat.seq=message.seq;seat.methods.add(message.method==='touch'?'virtual-pad':'keyboard');
       const claim=seat.clock.input(message.clientTime,serverNow()),inactive=['waiting','finished','eliminated'].includes(this.status?.roles[seat.id]);
-      if(!claim.accepted||inactive){reject(inactive?'out-of-role':claim.reason);this.queue(seat,edges.filter(e=>!e.down&&seat.held[e.button]));return;}
+      if(!claim.accepted||claim.at<this.startsAt||inactive){reject(inactive?'out-of-role':!claim.accepted?claim.reason:'before-start');this.queue(seat,edges.filter(e=>!e.down&&seat.held[e.button]));return;}
       this.queue(seat,edges.map(e=>({...e,at:claim.at,compensate:claim.reason==='accepted'})));return;
     }
     if(message.type==='release'){this.queue(seat,buttonEdges(seat.held,emptyButtons()));return;}
@@ -161,7 +162,7 @@ export class Room {
     try{
       const now=serverNow(),mono=performance.now();
       for(const seat of this.seats)if(seat.ws){const probe=seat.clock.probe(now);if(probe)this.send(seat.ws,probe);}
-      if(this.phase==='preparing'&&this.runner&&this.status){if(this.seats.every(s=>s.loaded)||now>=this.phaseUntil){if(this.seats.some(s=>s.ws&&!s.loaded)){await this.abort('asset-preload-timeout');return;}this.phase='countdown';this.startsAt=now+2500;this.broadcast();}}
+      if(this.phase==='preparing'&&this.runner&&this.status){if(this.seats.every(s=>s.loaded)||now>=this.phaseUntil){if(this.seats.some(s=>s.ws&&!s.loaded)){await this.abort('asset-preload-timeout');return;}this.phase='countdown';this.startsAt=now+COUNTDOWN_MS;this.broadcast();}}
       else if(this.phase==='countdown'&&now>=this.startsAt){this.phase='playing';this.last=mono;this.accumulator=0;this.actionDeadline=mono+(this.status.nextStepAt??10)*1000;for(const view of Object.values(this.views))view.sampleTime=now;await this.store.query("UPDATE round_attempts SET status='playing',started_at=now() WHERE match_id=$1 AND round_index=$2",[this.matchId,this.round]);this.broadcast();}
       else if(this.phase==='playing'){
         const meta=this.versions[this.round].manifest.meta;

@@ -9,6 +9,7 @@ import {prepareMusic,symbolicMusicAdapter,type MusicGenerationAdapter} from './m
 export {wavBuffer} from './music-assets';
 import { z } from 'zod';
 import {GenerationBudget,generationLimits,type GenerationLimits,type GenerationUsage} from './generation-budget';
+import {backgroundResponse} from './background-response';
 /** Accepted only while older API callers migrate; new jobs ignore these choices. */
 export type GameFormat={clock?:'realtime'|'action';minPlayers?:number;maxPlayers?:number};
 type Branch='brief'|'code'|'art'|'music'|'icon';
@@ -48,11 +49,12 @@ export class GenerationService {
   private publicJob(job:Job){const {attempts,...safe}=job;return {...safe,attempts:attempts.map(({attempt,error})=>({attempt,error}))};}
   private async save(job:Job){await this.store.query("INSERT INTO jobs(id,owner_id,status,record) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,record=EXCLUDED.record WHERE jobs.status='working'",[job.id,job.ownerId,job.status,JSON.stringify(job)]);}
   private async json(job:Job,model:string,name:string,schema:any,prompt:string,maxTokens=5000){
-    const budget=this.budget(job),client=new OpenAI({apiKey:process.env.OPENAI_API_KEY,timeout:150000,maxRetries:0,fetch:this.providerFetch});
+    const budget=this.budget(job),client=new OpenAI({apiKey:process.env.OPENAI_API_KEY,timeout:60000,maxRetries:0,fetch:this.providerFetch});
     const reasoningEffort=name==='music'?'low' as const:'high' as const;
     const body={model,input:prompt,max_output_tokens:maxTokens,...(/^gpt-[56]/.test(model)?{reasoning:{effort:reasoningEffort}}:{}),text:{format:{type:'json_schema' as const,name,schema,strict:true}}};budget.reserve(body,maxTokens);
-    const response=await client.responses.create(body,{signal:budget.signal});budget.check();
+    const response=await backgroundResponse(client,body,budget.signal);budget.check();
     job.usage.push({branch:name,model:response.model,reasoningEffort:body.reasoning?.effort,usage:response.usage});job.models[name]=response.model;
+    if(response.status!=='completed')throw new Error(`${name} generation ${response.status}: ${response.error?.message??response.incomplete_details?.reason??'no completed response'}`);
     if(!response.output_text)throw new Error(`${name} returned no usable output`);return JSON.parse(response.output_text);
   }
   private async run(job:Job,wantArt:boolean){

@@ -267,6 +267,7 @@ test('generation routes default and overridden models with the expected reasonin
  try{
   for(const scenario of [
    {code:undefined,music:undefined,models:['gpt-6-sol','gpt-5-mini'],reasoning:['high','low']},
+   {code:'gpt-6-astra',music:undefined,models:['gpt-6-astra','gpt-5-mini'],reasoning:['high','low']},
    {code:'gpt-5-mini',music:undefined,models:['gpt-5-mini','gpt-5-mini'],reasoning:['high','low']},
    {code:'gpt-5-mini',music:'gpt-4.1-mini',models:['gpt-5-mini','gpt-4.1-mini'],reasoning:['high',undefined]},
    {code:'gpt-4.1-mini',music:'gpt-6-sol',models:['gpt-4.1-mini','gpt-6-sol'],reasoning:[undefined,'low']},
@@ -287,6 +288,7 @@ test('generation routes default and overridden models with the expected reasonin
    assert.deepEqual(requests.map(r=>r.model),scenario.models);
    assert.deepEqual(requests.map(r=>r.reasoning?.effort),scenario.reasoning);
    assert.ok(requests.every(r=>r.text.format.type==='json_schema'&&r.text.format.strict===true));
+   assert.ok(requests.every(r=>r.background===true&&r.store===false));
    assert.deepEqual([done.models.brief,done.models.music],scenario.models.map(m=>`returned-${m}`));
    assert.deepEqual(done.usage.map((u:any)=>u.model),scenario.models.map(m=>`returned-${m}`));
    assert.deepEqual(done.usage.map((u:any)=>u.reasoningEffort),scenario.reasoning);
@@ -295,6 +297,18 @@ test('generation routes default and overridden models with the expected reasonin
  }finally{
   for(const [name,value] of [['OPENAI_API_KEY',previous.key],['CODE_MODEL',previous.code],['MUSIC_MODEL',previous.music]] as const){if(value===undefined)delete process.env[name];else process.env[name]=value;}
  }
+});
+
+test('incomplete provider output is reported rather than published as a valid brief',async()=>{
+ const key=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='fixture-only';
+ try{
+  const f=fixture({},async()=>new Response(JSON.stringify({id:'resp-incomplete',object:'response',status:'incomplete',model:'gpt-6-astra',output:[],incomplete_details:{reason:'max_output_tokens'},usage:{input_tokens:1,output_tokens:2000,total_tokens:2001}}),{headers:{'content-type':'application/json'}}));
+  const job=await f.service.create('owner','Build this incomplete fixture game');
+  await until(()=>f.records.at(-1)?.status==='failed');
+  const failed=await f.service.get(job.id,'owner');
+  assert.match(failed.error!,/brief generation incomplete: max_output_tokens/);
+  assert.equal(f.versions.length,0);assert.equal(failed.usage.length,1);
+ }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
 });
 
 test('game requests use GPT-6 Sol high while soundtrack requests retain GPT-5 Mini low',async()=>{

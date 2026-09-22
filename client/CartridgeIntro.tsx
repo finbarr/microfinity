@@ -1,6 +1,7 @@
 import {useLayoutEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import type {Manifest} from '../server/store';
+import {countdownValue} from '../shared/countdown';
 import './CartridgeIntro.css';
 
 export type IntroCartridge={id:string;meta:Manifest['meta'];icon?:string|null};
@@ -39,7 +40,7 @@ export function CartridgeIntro({playlist,startsAt,now}:{playlist:IntroCartridge[
         <div className="intro-cart-label"><div className="intro-cart-art">{game.icon?<img src={game.icon} alt=""/>:<span className="intro-cart-monogram" aria-hidden="true">{monogram(game.meta.title)}</span>}</div><span className="intro-round">{String(index+1).padStart(2,'0')}</span><strong title={game.meta.title}>{game.meta.title}</strong></div>
         <div className="intro-cart-contacts" aria-hidden="true"/>
       </li>)}</ol>
-      <div className="intro-footer"><span className="intro-signal"><i aria-hidden="true"/> DECK LOCKED</span><span className="intro-count">STARTING IN <b>{Math.max(1,Math.ceil(remaining/1000))}</b></span><span className="intro-skip">SPACE / ENTER / TAP TO SKIP</span></div>
+      <div className="intro-footer"><span className="intro-signal"><i aria-hidden="true"/> DECK LOCKED</span><span className="intro-count">STARTING IN <b>{countdownValue(startsAt,now)}</b></span><span className="intro-skip">SPACE / ENTER / TAP TO SKIP</span></div>
     </div>
   </div>,document.body);
 }

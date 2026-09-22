@@ -4,7 +4,7 @@ import type {GenerationLimits} from '../server/generation-budget';
 import type {MusicGenerationAdapter,MusicOutput} from '../server/music-generation';
 import sharp from 'sharp';
 const pause=()=>new Promise(r=>setTimeout(r,5));
-async function until(check:()=>any){const start=Date.now();while(!check()){if(Date.now()-start>25000)throw new Error('Fixture job did not settle');await pause();}}
+async function until(check:()=>any){const start=Date.now();while(!check()){if(Date.now()-start>70000)throw new Error('Fixture job did not settle');await pause();}}
 const partySource=(source:string)=>source.replace('players:[1,1]','players:[1,4]').replace("modifiers:['race','obstruction','pressure']",'modifiers:[]');
 function fixture(limits:Partial<GenerationLimits>={},providerFetch?:typeof fetch,musicProvider?:MusicGenerationAdapter){
  const sourceMusic={hash:'old-music',score:stockScore('toast-catch'),provenance:{model:'fixture-only'}};

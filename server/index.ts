@@ -4,8 +4,8 @@ import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { resolve } from 'node:path';
 import { Store } from './store';
-import { Room, settingsSchema } from './rooms';
-import { selectPlaylist, randomSchema } from './playlists';
+import { Room, roomRequestSchema } from './rooms';
+import { selectPlaylist } from './playlists';
 import { bootstrap } from './compiler';
 import { seed } from '../scripts/seed';
 import { z } from 'zod';
@@ -36,9 +36,9 @@ app.post('/api/jobs',async(req,res)=>{const guest=await auth(req),body=z.object(
 app.get('/api/jobs',async(req,res)=>{const guest=await auth(req);res.json(await store.query("SELECT id,status,record->>'title' AS title,record->>'prompt' AS prompt,record->>'previewVersion' AS version FROM jobs WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 30",[guest.id]));});
 app.get('/api/jobs/:id',async(req,res)=>{const guest=await auth(req);res.json(await generation.get(req.params.id,guest.id));});
 app.post('/api/rooms',async(req,res)=>{
-  const guest=await auth(req),input=z.object({versions:z.array(z.string().length(64)).min(1).max(12).optional(),random:randomSchema.optional(),settings:settingsSchema}).refine(v=>Boolean(v.versions)!==Boolean(v.random),'Choose a pinned list or a random selection').parse(req.body);
+  const guest=await auth(req),input=roomRequestSchema.parse(req.body);
   const selection=input.random?selectPlaylist((await store.library()).map(v=>v.manifest),input.settings,input.random):undefined;
-  const versions=await Promise.all((selection?.versions??input.versions!).map(v=>store.version(v))),room=new Room(store,guest.id,versions,input.settings,selection);rooms.set(room.id,room);res.json({id:room.id,selection});
+  const versions=await Promise.all((selection?.versions??input.versions??[]).map(v=>store.version(v))),room=new Room(store,guest.id,versions,input.settings,selection);rooms.set(room.id,room);res.json({id:room.id,selection:selection??null});
 });
 app.get('/api/challenges/:id',async(req,res)=>{const [challenge]=await store.query('SELECT id,title,definition FROM challenges WHERE id=$1',[req.params.id]);if(!challenge){res.status(404).json({error:'Challenge not found'});return;}const {seed,...publicSettings}=challenge.definition.settings;res.json({...challenge,definition:{...challenge.definition,settings:publicSettings}});});
 app.post('/api/challenges/:id/play',async(req,res)=>{const guest=await auth(req),[challenge]=await store.query('SELECT * FROM challenges WHERE id=$1',[req.params.id]);if(!challenge)throw new Error('Challenge not found');const versions=await Promise.all(challenge.definition.versions.map((v:string)=>store.version(v))),room=new Room(store,guest.id,versions,challenge.definition.settings,challenge.definition.selection);room.challengeId=challenge.id;rooms.set(room.id,room);res.json({id:room.id});});

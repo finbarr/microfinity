@@ -32,15 +32,15 @@ test('lobby bot ownership, queue revisions and generation phase preserve pinned 
     await room.message(a as any,{type:'playlist',revision:room.revision,versions:[toast.id]});assert.equal(room.challengeId,'');
     await room.disconnect(b as any);assert.equal(room.seats[1].controller,'scripted');
     await room.message(a as any,{type:'remove-bot',playerId:'p1'});assert.equal(room.seats.length,1);
-    await room.message(a as any,{type:'playlist',revision:room.revision,versions:[asteroid.id,toast.id]});assert.equal(room.seats.length,2,'a game needing more seats adds a bot');
-    await assert.rejects(()=>room.message(a as any,{type:'remove-bot',playerId:'p1'}),/needs the current/);
-    await room.message(a as any,{type:'start'});assert.notEqual(room.challengeId,original);
+    await room.message(a as any,{type:'playlist',revision:room.revision,versions:[asteroid.id,toast.id]});assert.equal(room.seats.length,1,'the lobby holds human places until start');
+    await room.message(a as any,{type:'start'});assert.equal(room.seats.length,2,'a game needing an opponent adds AI at start');assert.notEqual(room.challengeId,original);
     const [saved]=await store.query('SELECT definition FROM challenges WHERE id=$1',[original]);assert.deepEqual(saved.definition.versions,[asteroid.id,toast.id]);assert.deepEqual(saved.definition.settings.botTypes,['scripted','scripted']);
     await room.message(a as any,{type:'asset-error'});await room.message(a as any,{type:'edit-party'});
     await room.join(friend,b as any);await room.message(a as any,{type:'add-bot'});await room.join(third,c as any);
     await room.message(a as any,{type:'creating',active:true});await room.disconnect(a as any);assert.equal(room.creating,false);assert.equal(room.hostId,friend.id);
     await room.message(b as any,{type:'remove-bot',playerId:'p0'});assert.equal(room.seats[0].guestId,friend.id);assert.equal(b.messages.at(-1).playerId,'p0');assert.equal(c.messages.at(-1).playerId,'p1');
     const incompatible=new Room(store,host.id,[toast],{targetPlayers:2,mode:'pressure',botType:'scripted'});rooms.push(incompatible);const d=new Socket();await incompatible.join(host,d as any);
-    await assert.rejects(()=>incompatible.message(d as any,{type:'playlist',revision:0,versions:[asteroid.id]}),/does not support/);assert.equal(incompatible.versions[0].id,toast.id);
+    await incompatible.message(d as any,{type:'playlist',revision:incompatible.revision,versions:[asteroid.id]});assert.equal(incompatible.versions[0].id,asteroid.id);
+    await incompatible.message(d as any,{type:'start'});assert.equal(d.messages.at(-1).mode,'party-v1','legacy mode preference cannot exclude an otherwise playable cartridge');
   }finally{await Promise.all(rooms.map(r=>r.close()));await store.close();await rm(root,{recursive:true,force:true});}
 });

@@ -6,7 +6,7 @@ The shortest complete example is `games/toast-catch.ts`. For turns and placement
 
 ## Rules
 
-- `meta`: identity, title, short instruction, supported participant range, clock, arrangement, duration limit, style, score unit/direction, controller label, tags, compatible wrappers.
+- `meta`: identity, title, short instruction, clock, arrangement, duration limit, style, score unit/direction, controller label and tags. New sources omit `players` and `modifiers`; `defineGame` supplies the uniform `[1,4]` party contract and an empty legacy modifier list.
 - `init(ctx)`: return all mutable state. Precompute challenge schedules with `ctx.random()` or `ctx.integer(min,max)`; do not mix player-dependent random consumption into shared challenge content.
 - `step(state, inputs, ctx)`: mutate the serializable state. Real-time calls have exactly `dt=1/60`. Action-driven calls happen for input or recorded timeouts, with elapsed `dt`.
 - `observe(state, playerId, ctx)`: return what that player can currently see. Exclude hidden answers, RNG state, unrevealed schedules, and future events. Both browser rendering and Jev use this view.
@@ -17,6 +17,10 @@ The shortest complete example is `games/toast-catch.ts`. For turns and placement
 Scores: `ctx.addScore(id, amount)`, `ctx.setScore(id, amount)`, and read-only `ctx.scores`. Outcomes: `ctx.finishPlayer(id, 'success'|'failure'|'complete'|'eliminated')`; end a round using `ctx.finishRound(reason)`. Scores, outcomes, tournament points, and RL rewards are distinct concepts. Define a meaningful success/failure condition and deterministic ties.
 
 Context also supplies players, tick, simulation time, difficulty, and semantic feedback: `ctx.feedback('catch', {playerId, x, y})`. The engine gives feedback stable IDs and handles sounds plus small visual reactions. Never trigger audio from `draw`.
+
+Every cartridge can be selected by a party of one to four people. For `participation:'individual'`, write one attempt using `ctx.players[0]`: the engine gives each participant an isolated attempt with the same seed. Shared `simultaneous` and `rotating` games must handle the actual `ctx.players` array at every length from one through four, including turn rotation and timeouts. Choose the clock from the requested mechanic. Players do not configure clocks, player ranges, or adapters.
+
+Saved sources may retain explicit historical player limits. The party adapter executes their pinned native runtime without rewriting their code or metadata. It preserves shared native play whenever the roster fits, fills required opponents through the engine, and gives each party participant an isolated native attempt when a legacy cartridge has fewer slots. Private attempts use contiguous local IDs; public scores, roles, feedback and HUD ownership are mapped back to the party seats. New recordings identify this adapter as `party-v1`; existing recordings retain their original runtime and mode.
 
 ## Five buttons
 

@@ -8,12 +8,15 @@ import type { Mode } from '../runtime/modes';
 import { Store, id, hash, type Version } from './store';
 import { RuntimeProcess } from './runtime-process';
 import { DecisionScheduler, jevDecision, scriptedDecision } from './controllers';
-import type { Selection } from './playlists';
+import {selectPlaylist,randomSchema,type Selection} from './playlists';
 import {NetworkClock, serverNow, MAX_COMPENSATION_MS} from './network-clock';
 import {effectiveMode,participantCounts,type BotType} from '../shared/party';
 type QueuedEdge=Edge & {at?:number;compensate?:boolean};
 
-export const settingsSchema=z.object({targetPlayers:z.number().int().min(1).max(4).default(2),botType:z.enum(['jev','scripted']).default('jev'),botTypes:z.array(z.enum(['jev','scripted'])).max(4).default([]),mode:z.enum(['native','race','obstruction','pressure']).default('native'),difficulty:z.number().int().min(0).max(3).default(1),seed:z.number().int().min(0).max(4294967295).default(()=>randomBytes(4).readUInt32LE())});
+export const settingsSchema=z.object({targetPlayers:z.number().int().min(1).max(4).default(1),botType:z.enum(['jev','scripted']).default('jev'),botTypes:z.array(z.enum(['jev','scripted'])).max(4).default([]),mode:z.enum(['native','race','obstruction','pressure']).default('native'),difficulty:z.number().int().min(0).max(3).default(1),seed:z.number().int().min(0).max(4294967295).default(()=>randomBytes(4).readUInt32LE())});
+const versionIds=z.array(z.string().length(64)).max(12);
+export const roomRequestSchema=z.object({versions:versionIds.optional(),random:randomSchema.optional(),lobby:z.boolean().optional(),settings:settingsSchema.prefault({})})
+  .refine(v=>v.versions===undefined||v.random===undefined,'Choose a pinned list or a random selection');
 export type Settings=z.infer<typeof settingsSchema>;
 type Seat={id:string;name:string;color:string;guestId?:string;ws?:WebSocket;ready:boolean;loaded:boolean;controller:'human'|'jev'|'scripted';botType:BotType;epoch:number;seq:number;held:Buttons;queued:QueuedEdge[];clock:NetworkClock;rejected:Record<string,number>;scheduler:DecisionScheduler;history:any[];lastInput:number;methods:Set<string>;sources:Set<string>;fallback?:string};
 export class Room {
@@ -27,14 +30,12 @@ export class Room {
   private startedAt=0;private finishedAt:number|null=null;private participants:any[]=[];private definition:any;private activeRound:any=null;private checkpointAt=0;
   private termination:{kind:string;reason:string}|null=null;private rematchOf:string|null=null;
   private sequence<T>(operation:()=>T|Promise<T>):Promise<T>{const next=this.commands.then(operation);this.commands=next.then(()=>{},()=>{});return next;}
-  constructor(private store:Store,hostId:string,versions:Version[],settings:unknown,readonly selection?:Selection){
-    this.hostId=hostId;this.versions=versions;this.settings=settingsSchema.parse(settings);
-    if(!versions.length||versions.length>12)throw new Error('Choose between one and twelve games');
-    const counts=participantCounts(versions.map(v=>v.manifest),this.settings.mode);
-    const count=counts.find(n=>n>=this.settings.targetPlayers);
-    if(!count)throw new Error('These games do not support the selected mode and participant count');
-    this.settings.targetPlayers=count;
-    this.seats=Array.from({length:count},(_,i)=>this.makeSeat(i));this.syncBotSettings();
+  constructor(private store:Store,hostId:string,versions:Version[],settings:unknown={},public selection?:Selection){
+    this.hostId=hostId;this.versions=versions;this.settings=settingsSchema.parse(settings??{});
+    if(versions.length>12)throw new Error('Choose up to twelve games');
+    this.seats=Array.from({length:this.settings.targetPlayers},(_,i)=>this.makeSeat(i));
+    // Reserve the creator even when an invitee connects before the host socket.
+    this.seats[0].guestId=hostId;this.seats[0].name='Host';this.syncBotSettings();
     this.timer=setInterval(()=>void this.pump(),8);
   }
   private makeSeat(index:number):Seat {const botType=this.settings.botTypes[index]??this.settings.botType;return {id:`p${index}`,name:`${botType==='jev'?'Jev':'Bot'} ${index+1}`,color:colors[index],ready:true,loaded:false,controller:botType,botType,epoch:0,seq:0,held:emptyButtons(),queued:[],clock:new NetworkClock(),rejected:{},scheduler:new DecisionScheduler(Number(process.env.JEV_INTERVAL_MS)||200),history:[],lastInput:0,methods:new Set(),sources:new Set()};}
@@ -43,7 +44,13 @@ export class Room {
   join(guest:{id:string;name:string},ws:WebSocket){return this.sequence(()=>{
     if(this.closed||ws.readyState!==1)throw new Error('This party connection has closed');
     let seat=this.seats.find(s=>s.guestId===guest.id);
-    if(!seat){if(this.phase!=='lobby')throw new Error('This party has started. Join after the host returns to the lobby.');seat=this.seats.find(s=>!s.guestId&&!s.ws)??this.seats.find(s=>!s.ws);if(!seat)throw new Error('Party is full');if(seat.guestId===this.hostId)this.hostId=guest.id;seat.guestId=guest.id;}
+    if(!seat){
+      if(this.phase!=='lobby')throw new Error('This party has started. Join after the host returns to the lobby.');
+      seat=this.seats.find(s=>!s.guestId&&!s.ws);
+      if(!seat&&this.seats.length<4){seat=this.makeSeat(this.seats.length);this.seats.push(seat);}
+      if(!seat)throw new Error('Party is full (four players)');
+      seat.guestId=guest.id;this.syncBotSettings();this.challengeId='';this.revision++;
+    }
     seat.name=guest.name;seat.ready=false;
     if(seat.ws&&seat.ws!==ws)seat.ws.close(4001,'Session resumed elsewhere');seat.ws=ws;this.handoff(seat,'human');
     this.lastActivity=serverNow();
@@ -62,7 +69,7 @@ export class Room {
     if(message.type==='clock-reply'){const sample=seat.clock.accept(message.id,message.clientTime,serverNow());if(sample)this.send(ws,sample);return;}
     if(message.type==='ping'){this.send(ws,{type:'pong',clientTime:message.clientTime,serverTime:serverNow()});return;}
     this.lastActivity=serverNow();
-    if(['add-bot','remove-bot','bot-controller','playlist','creating','edit-party'].includes(message.type)){
+    if(['add-bot','remove-bot','bot-controller','playlist','random','creating','edit-party'].includes(message.type)){
       if(seat.guestId!==this.hostId)throw new Error('Only the host can edit this party');
       if(message.type==='edit-party'){
         if(this.phase!=='match-result')throw new Error('Finish this match before changing the party');
@@ -71,13 +78,8 @@ export class Room {
       }
       if(this.phase!=='lobby')throw new Error('Party setup can only change in the lobby');
       if(message.type==='creating'){this.creating=z.boolean().parse(message.active);this.broadcast();return;}
-      if(message.type==='playlist'){
-        if(message.revision!==this.revision)throw new Error('The party setup changed. Review the queue and try again.');
-        const ids=z.array(z.string().length(64)).min(1).max(12).parse(message.versions),versions=await Promise.all(ids.map(id=>this.store.version(id)));
-        if(versions.some(v=>v.manifest.provenance.draft===true&&!this.versions.some(old=>old.id===v.id)))throw new Error('Wait for this game to finish before adding it to the party');
-        const count=participantCounts(versions.map(v=>v.manifest),this.settings.mode).find(n=>n>=this.seats.length);
-        if(!count)throw new Error('This queue does not support your party mode and number of seats');
-        this.versions=versions;while(this.seats.length<count)this.seats.push(this.makeSeat(this.seats.length));
+      if(message.type==='playlist'||message.type==='random'){
+        await this.choosePlaylist(message);return;
       }else if(message.type==='add-bot'){
         if(!participantCounts(this.versions.map(v=>v.manifest),this.settings.mode).includes(this.seats.length+1))throw new Error('This queue cannot support another seat');
         this.seats.push(this.makeSeat(this.seats.length));
@@ -93,7 +95,16 @@ export class Room {
     if(message.type==='ready'&&this.phase==='lobby'){seat.ready=true;this.broadcast();return;}
     if(message.type==='loaded'&&this.phase==='preparing'){if(message.versionId!==this.versions[this.round].id)return;seat.loaded=true;return;}
     if(message.type==='asset-error'&&['preparing','countdown','playing'].includes(this.phase)){this.error='A player could not load or render this cartridge. Retry the match.';await this.abort('asset-load-failure');return;}
-    if(message.type==='start'){if(seat.guestId!==this.hostId)throw new Error('Only the host can start');if(this.phase!=='lobby'&&this.phase!=='match-result')return;await this.start(Boolean(message.newSeed));return;}
+    if(message.type==='start'){
+      if(seat.guestId!==this.hostId)throw new Error('Only the host can start');
+      if(this.phase!=='lobby'&&this.phase!=='match-result')return;
+      if(message.versions!==undefined||message.random!==undefined){
+        if(this.phase!=='lobby')throw new Error('Return to the lobby before changing games');
+        if(message.versions!==undefined&&message.random!==undefined)throw new Error('Choose a pinned list or a random selection');
+        await this.choosePlaylist({...message,type:message.random!==undefined?'random':'playlist',filters:message.random});
+      }
+      await this.start(Boolean(message.newSeed));return;
+    }
     if(message.type==='input'){
       const reject=(reason:string)=>{seat.rejected[reason]=(seat.rejected[reason]??0)+1;};
       if(this.phase!=='playing'||seat.controller!=='human'||message.matchId!==this.matchId||message.round!==this.round||message.epoch!==seat.epoch){reject('stale-ownership');return;}
@@ -106,14 +117,22 @@ export class Room {
     }
     if(message.type==='release'){this.queue(seat,buttonEdges(seat.held,emptyButtons()));return;}
   }
+  private async choosePlaylist(message:any){
+    if(message.revision!==this.revision)throw new Error('The party setup changed. Review the queue and try again.');
+    const selection=message.type==='random'?selectPlaylist((await this.store.library()).map(v=>v.manifest),this.settings,message.filters??{}):undefined;
+    const ids=selection?.versions??versionIds.parse(message.versions),versions=await Promise.all(ids.map(id=>this.store.version(id)));
+    if(versions.some(v=>v.manifest.provenance.draft===true&&!this.versions.some(old=>old.id===v.id)))throw new Error('Wait for this game to finish before adding it to the party');
+    this.versions=versions;this.selection=selection;this.setupChanged();
+  }
   private queue(seat:Seat,edges:QueuedEdge[]){if(seat.queued.length+edges.length>64)return;const at=serverNow();seat.queued.push(...edges.map(e=>({at,...e})));for(const e of edges)seat.held[e.button]=e.down;seat.lastInput=performance.now();}
   private async start(newSeed:boolean){
     if(this.creating)throw new Error('Return from game creation before starting the party');
-    if(this.phase==='lobby'&&this.seats.some(s=>s.ws&&!s.ready&&s.guestId!==this.hostId))throw new Error('Wait for friends to mark themselves ready');
+    if(!this.versions.length)throw new Error('Choose games or a random selection before starting');
     this.rematchOf=this.phase==='match-result'?this.matchId:null;
     if(newSeed)this.settings.seed=randomBytes(4).readUInt32LE();
     const count=Math.max(this.settings.targetPlayers,...this.versions.map(v=>v.manifest.meta.players[0]));
     while(this.seats.length<count)this.seats.push(this.makeSeat(this.seats.length));
+    this.syncBotSettings();
     this.round=0;this.rounds=[];this.points={};this.error='';this.matchId=id();this.startedAt=serverNow();this.finishedAt=null;this.termination=null;this.activeRound=null;
     this.participants=this.seats.map(s=>({playerId:s.id,guestId:s.guestId,name:s.name,controller:s.controller}));
     const definition={versions:this.versions.map(v=>v.id),settings:this.settings,seedPolicy:'fixed',selection:this.selection??null};
@@ -143,7 +162,7 @@ export class Room {
       const now=serverNow(),mono=performance.now();
       for(const seat of this.seats)if(seat.ws){const probe=seat.clock.probe(now);if(probe)this.send(seat.ws,probe);}
       if(this.phase==='preparing'&&this.runner&&this.status){if(this.seats.every(s=>s.loaded)||now>=this.phaseUntil){if(this.seats.some(s=>s.ws&&!s.loaded)){await this.abort('asset-preload-timeout');return;}this.phase='countdown';this.startsAt=now+2500;this.broadcast();}}
-      else if(this.phase==='countdown'&&now>=this.startsAt){this.phase='playing';this.last=mono;this.accumulator=0;this.actionDeadline=mono+10000;for(const view of Object.values(this.views))view.sampleTime=now;await this.store.query("UPDATE round_attempts SET status='playing',started_at=now() WHERE match_id=$1 AND round_index=$2",[this.matchId,this.round]);this.broadcast();}
+      else if(this.phase==='countdown'&&now>=this.startsAt){this.phase='playing';this.last=mono;this.accumulator=0;this.actionDeadline=mono+(this.status.nextStepAt??10)*1000;for(const view of Object.values(this.views))view.sampleTime=now;await this.store.query("UPDATE round_attempts SET status='playing',started_at=now() WHERE match_id=$1 AND round_index=$2",[this.matchId,this.round]);this.broadcast();}
       else if(this.phase==='playing'){
         const meta=this.versions[this.round].manifest.meta;
         this.decide(mono);
@@ -152,7 +171,7 @@ export class Room {
           let steps=0;while(this.accumulator>=1000/60&&steps++<8&&this.phase==='playing'){this.accumulator-=1000/60;await this.step(1/60,'tick');}
         }else {
           const hasInput=this.seats.some(s=>s.queued.length);
-          if(hasInput||mono>=this.actionDeadline){const event=mono>=this.actionDeadline?'timeout':'input';await this.step(Math.min(100,(mono-this.last)/1000),event);this.last=mono;if(event==='timeout')this.actionDeadline=mono+10000;}
+          if(hasInput||mono>=this.actionDeadline){const event=mono>=this.actionDeadline?'timeout':'input';await this.step(Math.min(100,(mono-this.last)/1000),event);this.last=mono;if(event==='timeout'&&this.status?.nextStepAt===undefined)this.actionDeadline=mono+10000;}
         }
         if(mono-this.lastSnapshot>=50&&this.phase==='playing'){await this.snapshotViews();this.lastSnapshot=mono;this.broadcast();}
         if(this.phase==='playing'&&now-this.checkpointAt>=5000)await this.checkpoint();
@@ -164,9 +183,10 @@ export class Room {
     const tickTime=this.versions[this.round].manifest.meta.clock==='realtime'?performance.timeOrigin+this.last-this.accumulator:serverNow();
     const edges:Record<string,Edge[]>={};
     for(const s of this.seats){const ready:Edge[]=[];while(s.queued.length&&(s.queued[0].at??tickTime)<=tickTime){const {at,compensate,...edge}=s.queued.shift()!;ready.push({...edge,...(!compensate||at===undefined?{}:{age:Math.min(MAX_COMPENSATION_MS,Math.max(0,tickTime-at))/1000})});}if(ready.length)edges[s.id]=ready;}
-    if(Object.keys(edges).length||event==='timeout')this.journal.push({tick:(this.status?.tick??0)+1,dt,event,edges});
+    if(this.versions[this.round].manifest.meta.clock==='action'||Object.keys(edges).length||event==='timeout')this.journal.push({tick:(this.status?.tick??0)+1,dt,event,edges});
     const previousRoles=this.status?.roles??{};this.status=await this.runner.call('step',edges,dt,event);
     for(const s of this.seats)if(previousRoles[s.id]!==this.status.roles[s.id]){s.epoch++;s.seq=0;s.queued=buttonEdges(s.held,emptyButtons());s.held=emptyButtons();this.actionDeadline=performance.now()+10000;}
+    if(this.status.nextStepAt!==undefined)this.actionDeadline=performance.now()+Math.max(0,this.status.nextStepAt-this.status.time)*1000;
     if(this.status.feedback.length)this.broadcastEvent({type:'feedback',matchId:this.matchId,round:this.round,events:this.status.feedback});
     if(this.status.done)await this.finishRound();
   }

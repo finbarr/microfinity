@@ -1,13 +1,13 @@
 import { Engine, type Configuration } from './engine';
 import { advanceInput } from './input';
 import { emptyButtons, type Buttons, type Edge, type Game, type Outcome, type Feedback } from '../sdk/index';
-export type Mode='native'|'race'|'obstruction'|'pressure';
+export type Mode='native'|'race'|'obstruction'|'pressure'|'party-v1';
 /** Reusable modes own wrapper state, never rewrite cartridge state. */
 export class ModeEngine {
   private engines:Engine[]=[];
   private state={turn:0,tick:0,time:0,pressure:0,obscuredUntil:0,by:'',cooldown:{} as Record<string,number>,held:{} as Record<string,Buttons>,feedback:[] as Feedback[],done:false};
   constructor(private game:Game,private config:Configuration,readonly mode:Mode='native') {
-    if(mode!=='native'&&!game.meta.modifiers.includes(mode))throw new Error('Incompatible party mode');
+    if(mode==='party-v1'||mode!=='native'&&!game.meta.modifiers.includes(mode))throw new Error('Incompatible party mode');
     for(const p of config.players){this.state.held[p.id]=emptyButtons();this.state.cooldown[p.id]=0;}
     this.engines=mode==='native'?[new Engine(game,config)]:config.players.map(p=>new Engine(game,{...config,players:[p]}));
   }

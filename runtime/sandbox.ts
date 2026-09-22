@@ -1,7 +1,9 @@
 import { getQuickJS, type QuickJSContext, type QuickJSRuntime } from 'quickjs-emscripten';
 import { safeJSON, validateCommands, cartridgeInfoSchema } from './validation';
+import {PartyRuntime} from './party';
 
 export class Sandbox {
+  private party?:PartyRuntime;
   private constructor(private vm:QuickJSContext,private runtime:QuickJSRuntime,private quota:{remaining:number;deadline:number}){}
   static async create(code:string,bootstrap:string) {
     if(code.length>200_000||bootstrap.length>500_000)throw new Error('Module size limit exceeded');
@@ -23,6 +25,20 @@ export class Sandbox {
     result.value.dispose();
   }
   call(method:string,...args:any[]):any {
+    if(method==='init'){
+      this.party=undefined;
+      if(args[1]==='party-v1'){
+        this.party=new PartyRuntime((method,...args)=>this.rawCall(method,...args),this.rawCall('meta').meta,args[0]);
+        return this.party.status();
+      }
+    }
+    if(this.party&&['step','observe','save','restore'].includes(method)){
+      const output=method==='step'?this.party.step(...args as Parameters<PartyRuntime['step']>):method==='observe'?this.party.observe(args[0]):method==='save'?this.party.save():this.party.restore(args[0]);
+      safeJSON(output,300_000);return output;
+    }
+    return this.rawCall(method,...args);
+  }
+  private rawCall(method:string,...args:any[]):any {
     this.quota.remaining=method==='init'?500:200;this.quota.deadline=Date.now()+100;
     const json=safeJSON({method,args},300_000),fn=this.vm.getProp(this.vm.global,'__dispatch'),arg=this.vm.newString(json);
     let result;

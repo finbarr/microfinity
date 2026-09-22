@@ -56,7 +56,15 @@ export type Game<S = any, V = any> = {
   /** Informational roles and controller validity, never solution-bearing action masks. */
   role?(state: S, playerId: string): string;
 };
-export function defineGame<S, V>(game: Game<S, V>): Game<S, V> { return game; }
+/** New cartridges omit player limits. Shared games handle ctx.players (1–4);
+ * individual games receive one player per engine-managed, equal-seed attempt.
+ * Explicit limits remain readable for saved/legacy rule compatibility. */
+export type GameDefinition<S = any, V = any> = Omit<Game<S,V>, 'meta'> & {
+  meta: Omit<Metadata,'players'|'modifiers'> & {players?:[number,number];modifiers?:Metadata['modifiers']};
+};
+export function defineGame<S, V>(game: GameDefinition<S, V>): Game<S, V> {
+  return {...game,meta:{...game.meta,players:game.meta.players??[1,4],modifiers:game.meta.modifiers??[]}};
+}
 export const colors = ['#86efac', '#f9a8d4', '#93c5fd', '#fde047'];
 export const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 export const distance = (a: {x:number;y:number}, b: {x:number;y:number}) => Math.hypot(a.x-b.x, a.y-b.y);

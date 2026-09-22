@@ -318,7 +318,7 @@ test('game requests use GPT-6 Sol high while soundtrack requests retain GPT-5 Mi
   const originalSource=partySource(await readFile('games/toast-catch.ts','utf8'));
   const badSource=originalSource+'\nconst marker: number = "broken";';
   const requests:any[]=[];let codeCalls=0;
-  const f=fixture({},async(_url,init)=>{
+  const f=fixture({codeOutputTokens:20000,maxOutputTokens:75000},async(_url,init)=>{
    const body=JSON.parse(String(init?.body));
    if(!body.text)return new Response(JSON.stringify({error:{message:'fixture icon unavailable'}}),{status:500,headers:{'content-type':'application/json'}});
    requests.push(body);const branch=body.text.format.name;
@@ -329,7 +329,7 @@ test('game requests use GPT-6 Sol high while soundtrack requests retain GPT-5 Mi
   await until(()=>f.records.at(-1)?.status!=='working');const done=await f.service.get(job.id,'owner');
   assert.equal(done.status,'ready',done.error??'Unexpected failure');
   assert.deepEqual(requests.map(r=>r.text.format.name).sort(),['brief','cartridge','cartridge','music']);
-  for(const request of requests){const music=request.text.format.name==='music';assert.equal(request.model,music?'gpt-5-mini':'gpt-6-sol');assert.equal(request.reasoning.effort,music?'low':'high');}
+  for(const request of requests){const music=request.text.format.name==='music';assert.equal(request.model,music?'gpt-5-mini':'gpt-6-sol');assert.equal(request.reasoning.effort,music?'low':'high');if(request.text.format.name==='cartridge')assert.equal(request.max_output_tokens,20000);}
   assert.equal((done.usage.find((u:any)=>u.branch==='cartridge') as any).reasoningEffort,'high');
  }finally{for(const [key,value] of Object.entries(env))if(value===undefined)delete process.env[key];else process.env[key]=value;}
 });

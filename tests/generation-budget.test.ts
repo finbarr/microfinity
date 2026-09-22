@@ -14,6 +14,13 @@ test('provider reservations enforce cumulative UTF-8, token, request and image b
   budget.reserve({},1000);assert.throws(()=>budget.reserve({},0),/request budget/);
  }finally{budget.dispose();}
  assert.throws(()=>generationLimits({}, {GENERATION_TIMEOUT_MS:'NaN'}));assert.throws(()=>generationLimits({}, {GENERATION_CODE_ATTEMPTS:'100'}));
+ assert.throws(()=>generationLimits({}, {GENERATION_CODE_OUTPUT_TOKENS:'50001'}));
+});
+
+test('Astra reservations allow its reasoning and source within the configured total budget',()=>{
+ const limits=generationLimits({}, {GENERATION_TIMEOUT_MS:'900000',GENERATION_CODE_OUTPUT_TOKENS:'20000',GENERATION_MAX_OUTPUT_TOKENS:'75000'});
+ const budget=new GenerationBudget(limits);
+ try{budget.reserve({},2000);budget.reserve({},0,true);budget.reserve({},0,true);for(let i=0;i<3;i++)budget.reserve({},limits.codeOutputTokens);for(let i=0;i<2;i++)budget.reserve({},6500);assert.equal(budget.usage.reservedOutputTokens,75000);assert.equal(budget.usage.calls,8);assert.throws(()=>budget.reserve({},1),/request budget/);}finally{budget.dispose();}
 });
 
 test('compiler cancellation interrupts active work and leaves later compilation usable',async()=>{

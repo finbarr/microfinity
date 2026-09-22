@@ -260,3 +260,38 @@ test('an expired icon request cannot publish late output after a playable previe
   assert.equal(f.versions.length,1);assert.deepEqual(f.versions[0],preview);assert.equal((await f.service.get(job.id,'owner')).finishedVersion,undefined);
  }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
 });
+
+test('generation routes default and overridden models with the expected reasoning and records provider model',async()=>{
+ const previous={key:process.env.OPENAI_API_KEY,code:process.env.CODE_MODEL,music:process.env.MUSIC_MODEL};
+ process.env.OPENAI_API_KEY='fixture-only';
+ try{
+  for(const scenario of [
+   {code:undefined,music:undefined,models:['gpt-6-luna','gpt-6-luna'],reasoning:['low','low']},
+   {code:'gpt-5-mini',music:undefined,models:['gpt-5-mini','gpt-5-mini'],reasoning:['low','low']},
+   {code:'gpt-5-mini',music:'gpt-4.1-mini',models:['gpt-5-mini','gpt-4.1-mini'],reasoning:['low',undefined]},
+   {code:'gpt-4.1-mini',music:'gpt-6-luna',models:['gpt-4.1-mini','gpt-6-luna'],reasoning:[undefined,'low']},
+  ]){
+   if(scenario.code===undefined)delete process.env.CODE_MODEL;else process.env.CODE_MODEL=scenario.code;
+   if(scenario.music===undefined)delete process.env.MUSIC_MODEL;else process.env.MUSIC_MODEL=scenario.music;
+   const requests:any[]=[];
+   const f=fixture({},(async(_url,init)=>{
+    const body=JSON.parse(String(init?.body));requests.push(body);
+    const output=body.text.format.name==='brief'?f.brief:stockScore('toast-catch');
+    return new Response(JSON.stringify({id:`fixture-${requests.length}`,object:'response',created_at:1,status:'completed',model:`returned-${body.model}`,output:[{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:JSON.stringify(output),annotations:[]}]}],usage:{input_tokens:1,output_tokens:1,total_tokens:2}}),{headers:{'content-type':'application/json'}});
+   }) as typeof fetch);
+   (f.original.manifest as any).icon={name:'cartridge-icon',hash:'original-icon',url:'/assets/original-icon.png',width:256,height:256};
+   const job=await f.service.create('owner','Regenerate this fixture music only',{remix:'original',musicOnly:true});
+   await until(()=>f.records.at(-1)?.id===job.id&&f.records.at(-1)?.status!=='working');
+   const done=await f.service.get(job.id,'owner');
+   assert.equal(done.status,'ready',done.error??'Unexpected failure');
+   assert.deepEqual(requests.map(r=>r.model),scenario.models);
+   assert.deepEqual(requests.map(r=>r.reasoning?.effort),scenario.reasoning);
+   assert.ok(requests.every(r=>r.text.format.type==='json_schema'&&r.text.format.strict===true));
+   assert.deepEqual([done.models.brief,done.models.music],scenario.models.map(m=>`returned-${m}`));
+   assert.deepEqual(done.usage.map((u:any)=>u.model),scenario.models.map(m=>`returned-${m}`));
+   assert.equal(f.versions.at(-1).manifest.music.provenance.model,`returned-${scenario.models[1]}`);
+  }
+ }finally{
+  for(const [name,value] of [['OPENAI_API_KEY',previous.key],['CODE_MODEL',previous.code],['MUSIC_MODEL',previous.music]] as const){if(value===undefined)delete process.env[name];else process.env[name]=value;}
+ }
+});

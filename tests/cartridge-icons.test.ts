@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import sharp from 'sharp';
@@ -37,5 +37,24 @@ test('backfill is dry-run safe and publishes a resumable icon-only successor wit
   assert.equal((await store.query('SELECT version_id FROM cartridge_ratings WHERE game_id=$1',[meta.id]))[0].version_id,prior.id);
   const resumed=await backfillCartridgeIcons(store,{limit:5,generate:generate as any,log:()=>{}});
   assert.equal(resumed.created,0);assert.equal(requested,1);
+  const galleryPrior=await store.putVersion(source,code,meta,assets,{...music,hash:'gallery-music'},{kind:'generated'},guest.id);
+  const iconsDir=join(root,'gallery-icons');await mkdir(iconsDir);
+  const galleryPng=await sharp({create:{width:256,height:256,channels:3,background:'#cc6644'}}).png().toBuffer();
+  await writeFile(join(iconsDir,`${meta.id}.png`),galleryPng);
+  await writeFile(join(iconsDir,'manifest.json'),JSON.stringify({icons:[{gameId:meta.id,model:'fixture-gallery-model',prompt:'A gallery cover'}]}));
+  const galleryLogs:string[]=[],countBefore=(await store.query('SELECT id FROM versions')).length;
+  const preview=await backfillCartridgeIcons(store,{limit:5,dryRun:true,iconsDir,log:message=>galleryLogs.push(message)});
+  assert.equal(preview.created,0);assert.match(galleryLogs[0],/pre-generated/);assert.equal((await store.query('SELECT id FROM versions')).length,countBefore);
+  const noProvider=async()=>{throw new Error('Paid generation must not run for supplied icons');};
+  const imported=await backfillCartridgeIcons(store,{limit:5,iconsDir,generate:noProvider as any,log:()=>{}});
+  assert.equal(imported.created,1);assert.equal(imported.failed,0);
+  const [importedRow]=await store.query<{id:string}>('SELECT id FROM versions WHERE game_id=$1 AND id<>$2 AND id<>$3 AND id<>$4',[meta.id,prior.id,next.id,galleryPrior.id]);
+  const galleryVersion=await store.version(importedRow.id);
+  assert.equal(galleryVersion.manifest.icon?.hash,hash(galleryPng));
+  assert.deepEqual(galleryVersion.manifest.icon?.provenance,{kind:'pre-generated-icon',gameId:meta.id,source:{gameId:meta.id,model:'fixture-gallery-model',prompt:'A gallery cover'}});
+  assert.equal(galleryVersion.source,galleryPrior.source);assert.equal(galleryVersion.code,galleryPrior.code);
+  assert.equal(galleryVersion.manifest.runtimeVersion,galleryPrior.manifest.runtimeVersion);
+  assert.deepEqual(galleryVersion.manifest.assets,galleryPrior.manifest.assets);assert.deepEqual(galleryVersion.manifest.music,galleryPrior.manifest.music);
+  assert.equal((await backfillCartridgeIcons(store,{limit:5,iconsDir,generate:noProvider as any,log:()=>{}})).created,0);
  }finally{await store.close();await rm(root,{recursive:true,force:true});if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
 });

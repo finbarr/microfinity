@@ -1,17 +1,18 @@
 import 'dotenv/config';
-import {access,readdir} from 'node:fs/promises';
+import {access,readdir,stat} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {Store,type Version} from '../server/store';
-import {bundledCartridgeIcon,generateCartridgeIcon} from '../server/cartridge-icons';
+import {bundledCartridgeIcon,cartridgeIconFromDirectory,generateCartridgeIcon} from '../server/cartridge-icons';
 import {GenerationBudget,generationLimits} from '../server/generation-budget';
 
 type Candidate=Version&{owner_id:string|null};
-export type BackfillOptions={limit:number;dryRun?:boolean;gameId?:string;generate?:typeof generateCartridgeIcon;log?:(message:string)=>void};
+export type BackfillOptions={limit:number;dryRun?:boolean;gameId?:string;iconsDir?:string;generate?:typeof generateCartridgeIcon;log?:(message:string)=>void};
 
 /** Each run selects only the newest ready, icon-less version of each game. */
 export async function backfillCartridgeIcons(store:Store,options:BackfillOptions){
   const log=options.log??console.log;
   if(!Number.isInteger(options.limit)||options.limit<1||options.limit>100)throw new Error('--limit must be between 1 and 100');
+  if(options.iconsDir&&!(await stat(options.iconsDir)).isDirectory())throw new Error('--icons-dir must name a directory');
   const builtins=new Set((await readdir('games')).filter(name=>name.endsWith('.ts')).map(name=>name.slice(0,-3)));
   const rows=await store.query<Candidate>(`SELECT latest.* FROM (
     SELECT DISTINCT ON (v.game_id) v.*,g.owner_id FROM versions v JOIN games g ON g.id=v.game_id
@@ -24,11 +25,14 @@ export async function backfillCartridgeIcons(store:Store,options:BackfillOptions
     const builtin=builtins.has(prior.game_id);
     let hasBundle=false;
     if(builtin)try{await access(join('games','icons',`${prior.game_id}.png`));hasBundle=true;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
-    if(builtin&&!hasBundle){log(`Skip ${prior.game_id}: bundled icon has not arrived`);result.skipped++;continue;}
-    if(options.dryRun){log(`Would publish icon-only successor for ${prior.game_id} (${builtin?'bundled':'image model'})`);continue;}
+    let hasProvided=false;
+    if(options.iconsDir)try{await access(join(options.iconsDir,`${prior.game_id}.png`));hasProvided=true;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+    if(builtin&&!hasBundle&&!hasProvided){log(`Skip ${prior.game_id}: bundled icon has not arrived`);result.skipped++;continue;}
+    if(options.dryRun){log(`Would publish icon-only successor for ${prior.game_id} (${hasBundle?'bundled':hasProvided?'pre-generated':'image model'})`);continue;}
     let budget:GenerationBudget|undefined;
     try{
-      let icon=hasBundle?await bundledCartridgeIcon(store,prior.game_id):undefined;
+      let icon=hasBundle?await bundledCartridgeIcon(store,prior.game_id):hasProvided?await cartridgeIconFromDirectory(store,options.iconsDir!,prior.game_id,'pre-generated-icon'):undefined;
+      if((hasBundle||hasProvided)&&!icon)throw new Error('Selected icon disappeared before import');
       if(!icon){
         if(!process.env.OPENAI_API_KEY)throw new Error('OPENAI_API_KEY is not configured');
         budget=new GenerationBudget(generationLimits());
@@ -45,18 +49,19 @@ export async function backfillCartridgeIcons(store:Store,options:BackfillOptions
 }
 
 function argumentsFrom(argv:string[]){
-  let dataDir='',limit=10,dryRun=false,gameId:string|undefined;
+  let dataDir='',limit=10,dryRun=false,gameId:string|undefined,iconsDir:string|undefined;
   for(let i=0;i<argv.length;i++){
     const arg=argv[i];
     if(arg==='--data-dir')dataDir=argv[++i]??'';
     else if(arg==='--limit')limit=Number(argv[++i]);
     else if(arg==='--game-id')gameId=argv[++i];
+    else if(arg==='--icons-dir'){iconsDir=argv[++i];if(!iconsDir||iconsDir.startsWith('--'))throw new Error('Pass a path after --icons-dir');}
     else if(arg==='--dry-run')dryRun=true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   if(!dataDir)throw new Error('Pass --data-dir PATH for the existing local PGlite data directory');
   if(gameId&&!/^[a-z0-9-]+$/.test(gameId))throw new Error('Invalid --game-id');
-  return {dataDir:resolve(dataDir),limit,dryRun,gameId};
+  return {dataDir:resolve(dataDir),limit,dryRun,gameId,iconsDir:iconsDir?resolve(iconsDir):undefined};
 }
 
 if(process.argv[1]?.endsWith('backfill-cartridge-icons.ts')){

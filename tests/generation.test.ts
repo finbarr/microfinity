@@ -266,10 +266,10 @@ test('generation routes default and overridden models with the expected reasonin
  process.env.OPENAI_API_KEY='fixture-only';
  try{
   for(const scenario of [
-   {code:undefined,music:undefined,models:['gpt-6-luna','gpt-6-luna'],reasoning:['low','low']},
-   {code:'gpt-5-mini',music:undefined,models:['gpt-5-mini','gpt-5-mini'],reasoning:['low','low']},
-   {code:'gpt-5-mini',music:'gpt-4.1-mini',models:['gpt-5-mini','gpt-4.1-mini'],reasoning:['low',undefined]},
-   {code:'gpt-4.1-mini',music:'gpt-6-luna',models:['gpt-4.1-mini','gpt-6-luna'],reasoning:[undefined,'low']},
+   {code:undefined,music:undefined,models:['gpt-6-sol','gpt-5-mini'],reasoning:['high','low']},
+   {code:'gpt-5-mini',music:undefined,models:['gpt-5-mini','gpt-5-mini'],reasoning:['high','low']},
+   {code:'gpt-5-mini',music:'gpt-4.1-mini',models:['gpt-5-mini','gpt-4.1-mini'],reasoning:['high',undefined]},
+   {code:'gpt-4.1-mini',music:'gpt-6-sol',models:['gpt-4.1-mini','gpt-6-sol'],reasoning:[undefined,'low']},
   ]){
    if(scenario.code===undefined)delete process.env.CODE_MODEL;else process.env.CODE_MODEL=scenario.code;
    if(scenario.music===undefined)delete process.env.MUSIC_MODEL;else process.env.MUSIC_MODEL=scenario.music;
@@ -289,9 +289,33 @@ test('generation routes default and overridden models with the expected reasonin
    assert.ok(requests.every(r=>r.text.format.type==='json_schema'&&r.text.format.strict===true));
    assert.deepEqual([done.models.brief,done.models.music],scenario.models.map(m=>`returned-${m}`));
    assert.deepEqual(done.usage.map((u:any)=>u.model),scenario.models.map(m=>`returned-${m}`));
+   assert.deepEqual(done.usage.map((u:any)=>u.reasoningEffort),scenario.reasoning);
    assert.equal(f.versions.at(-1).manifest.music.provenance.model,`returned-${scenario.models[1]}`);
   }
  }finally{
   for(const [name,value] of [['OPENAI_API_KEY',previous.key],['CODE_MODEL',previous.code],['MUSIC_MODEL',previous.music]] as const){if(value===undefined)delete process.env[name];else process.env[name]=value;}
  }
+});
+
+test('game requests use GPT-6 Sol high while soundtrack requests retain GPT-5 Mini low',async()=>{
+ const env={OPENAI_API_KEY:process.env.OPENAI_API_KEY,CODE_MODEL:process.env.CODE_MODEL,MUSIC_MODEL:process.env.MUSIC_MODEL};
+ process.env.OPENAI_API_KEY='fixture-only';delete process.env.CODE_MODEL;delete process.env.MUSIC_MODEL;
+ try{
+  const originalSource=partySource(await readFile('games/toast-catch.ts','utf8'));
+  const badSource=originalSource+'\nconst marker: number = "broken";';
+  const requests:any[]=[];let codeCalls=0;
+  const f=fixture({},async(_url,init)=>{
+   const body=JSON.parse(String(init?.body));
+   if(!body.text)return new Response(JSON.stringify({error:{message:'fixture icon unavailable'}}),{status:500,headers:{'content-type':'application/json'}});
+   requests.push(body);const branch=body.text.format.name;
+   const data=branch==='brief'?f.brief:branch==='music'?stockScore('toast-catch'):{source:++codeCalls===1?badSource:originalSource};
+   return new Response(JSON.stringify({id:'response-fixture',object:'response',status:'completed',model:body.model,output_text:JSON.stringify(data),output:[{type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify(data),annotations:[]}]}],usage:{input_tokens:1,output_tokens:1,total_tokens:2}}),{headers:{'content-type':'application/json'}});
+  });
+  const job=await f.service.create('owner','Change this fixture game and soundtrack',{remix:'original',art:false});
+  await until(()=>f.records.at(-1)?.status!=='working');const done=await f.service.get(job.id,'owner');
+  assert.equal(done.status,'ready',done.error??'Unexpected failure');
+  assert.deepEqual(requests.map(r=>r.text.format.name).sort(),['brief','cartridge','cartridge','music']);
+  for(const request of requests){const music=request.text.format.name==='music';assert.equal(request.model,music?'gpt-5-mini':'gpt-6-sol');assert.equal(request.reasoning.effort,music?'low':'high');}
+  assert.equal((done.usage.find((u:any)=>u.branch==='cartridge') as any).reasoningEffort,'high');
+ }finally{for(const [key,value] of Object.entries(env))if(value===undefined)delete process.env[key];else process.env[key]=value;}
 });

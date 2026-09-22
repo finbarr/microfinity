@@ -1,0 +1,38 @@
+[Unit]
+Description=Microfinity browser arcade
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=microfinity
+Group=microfinity
+WorkingDirectory=/opt/microfinity/current
+EnvironmentFile=/etc/microfinity/environment
+EnvironmentFile=/etc/microfinity/providers
+ExecStart=/usr/local/bin/node scripts/start.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=40
+KillMode=mixed
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/microfinity/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=true
+TasksMax=256
+MemoryHigh=2800M
+MemoryMax=3200M
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

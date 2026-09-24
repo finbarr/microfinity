@@ -126,7 +126,7 @@ export class Room {
   private async choosePlaylist(message:any){
     if(message.revision!==this.revision)throw new Error('The party setup changed. Review the queue and try again.');
     const selection=message.type==='random'?selectPlaylist((await this.store.library()).map(v=>v.manifest),this.settings,message.filters??{}):undefined;
-    const ids=selection?.versions??versionIds.parse(message.versions),versions=await Promise.all(ids.map(id=>this.store.version(id)));
+    const ids=selection?.versions??versionIds.parse(message.versions),versions=await Promise.all(ids.map(id=>this.store.visibleVersion(id)));
     if(versions.some(v=>v.manifest.provenance.draft===true&&!this.versions.some(old=>old.id===v.id)))throw new Error('Wait for this game to finish before adding it to the party');
     this.versions=versions;this.selection=selection;this.setupChanged();
   }

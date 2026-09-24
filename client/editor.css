@@ -1,0 +1,83 @@
+.studio.creator { max-width: 1500px; padding: 30px 28px 50px; }
+.editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.editor-heading h1 { font-size: clamp(24px, 3vw, 38px); letter-spacing: -1px; margin-top: 10px; overflow-wrap: anywhere; }
+.editor-heading p { margin: 10px 0 0; font-size: 13px; }
+.editor-columns { display: grid; grid-template-columns: minmax(300px, .8fr) minmax(0, 1.2fr); gap: 24px; align-items: start; }
+.editor-chat { background: #101625; border: 1px solid var(--line); min-width: 0; }
+.editor-connection { padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 10px; color: var(--muted); }
+.editor-conversation { height: clamp(180px, calc(100dvh - 610px), 360px); min-height: 240px; overflow-y: auto; overscroll-behavior: contain; padding: 22px 18px; }
+.editor-event { margin-bottom: 20px; overflow-wrap: anywhere; }
+.editor-event > span { color: var(--cyan); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+.editor-event p { white-space: pre-wrap; font-size: 12px; line-height: 1.8; margin: 8px 0; color: var(--ink); }
+.editor-event.user { background: #253344; padding: 14px; margin-left: 24px; border-left: 2px solid var(--orange); }
+.editor-event.user > span { color: var(--orange); }
+.editor-event.event-ready p, .editor-event.event-published p { color: var(--orange); }
+.editor-event.event-failed p { color: #ffb4c4; }
+.editor-event figure { margin: 0; }
+.editor-event img { aspect-ratio: 1.6; object-fit: contain; width: 100%; display: block; border: 1px solid #42516b; image-rendering: auto; }
+.editor-event figcaption { font-size: 10px; color: var(--muted); padding: 8px 0; }
+.editor-welcome { margin: 30px auto; max-width: 310px; text-align: center; }
+.editor-welcome > span { color: var(--pink); font-size: 36px; }
+.editor-welcome p { font-size: 13px; }
+.editor-progress { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line); color: var(--cyan); font-size: 11px; }
+.editor-progress > span:nth-child(2) { flex: 1; }
+.editor-progress button { font-size: 10px; padding: 6px 10px; }
+.editor-composer { border-top: 1px solid var(--line); padding: 18px; }
+.editor-composer > label { font-size: 12px; display: block; margin-bottom: 10px; }
+.editor-composer textarea { width: 100%; min-height: 110px; resize: vertical; font-size: 13px; line-height: 1.6; }
+.editor-composer-bottom { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; }
+.editor-composer small { font-size: 10px; color: var(--muted); }
+.editor-composer details { margin-top: 18px; font-size: 11px; color: var(--muted); }
+.editor-composer summary { cursor: pointer; padding: 8px 0; }
+.editor-composer details label { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+.editor-error { color: #ffb4c4; margin: 16px; font-size: 12px; }
+.editor-stage { min-width: 0; }
+.editor-empty-stage { min-height: 360px; aspect-ratio: 1.6; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; text-align: center; border: 1px dashed #475471; background: radial-gradient(ellipse, #20233f, #0b0e1b); }
+.editor-empty-stage > span { font-size: 72px; color: var(--pink); margin-bottom: 20px; text-shadow: 0 0 45px #ff79b833; }
+.editor-empty-stage h2 { font-size: 20px; }
+.editor-empty-stage p { max-width: 330px; font-size: 12px; }
+.editor-empty-stage:has(img) { padding: 0; min-height: 0; }
+.editor-empty-stage img { width: 100%; display: block; }
+.editor-media { display: flex; gap: 16px; padding: 18px; margin-top: 18px; border: 1px solid var(--line); align-items: center; flex-wrap: wrap; background: #131a2a; }
+.editor-media img { width: 70px; height: 70px; object-fit: contain; }
+.editor-media > div { flex: 1; min-width: 160px; }
+.editor-media span { display: block; font-size: 9px; color: var(--cyan); letter-spacing: 1px; margin-bottom: 8px; }
+.editor-media audio { width: 100%; height: 36px; }
+.editor-revisions, .preview-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.editor-revisions label, .preview-toolbar label { display: flex; align-items: center; gap: 8px; font-size: 11px; min-width: 0; }
+.editor-revisions label { flex: 1; }
+.editor-revisions select { min-width: 0; width: 100%; max-width: 280px; }
+.editor-revisions button, .preview-toolbar button, .preview-toolbar select { font-size: 11px; }
+.editor-new-version { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; margin-bottom: 16px; border: 1px solid var(--orange); background: #26321b; font-size: 11px; }
+.editor-preview .cabinet { margin: 0; }
+.editor-preview .cabinet-marquee h2 { font-size: clamp(16px, 1.8vw, 24px); }
+.editor-preview .cabinet-meta { display: none; }
+.preview-start { aspect-ratio: 1.6; display: grid; place-content: center; padding: 20px; }
+.preview-note { font-size: 10px; margin-top: 12px; }
+.editor-history { margin-top: 40px; border-top: 1px solid var(--line); padding-top: 24px; display: flex; flex-wrap: wrap; gap: 12px; }
+.editor-history h2 { flex: 0 0 100%; font-size: 20px; margin-bottom: 6px; }
+.editor-history button { text-align: left; min-width: 190px; max-width: 100%; }
+.editor-history button[aria-current] { border-color: var(--orange); }
+.editor-history strong, .editor-history span { display: block; font-size: 11px; overflow-wrap: anywhere; }
+.editor-history span { font-size: 10px; color: var(--muted); margin-top: 7px; }
+.editor-mobile-tabs { display: none; }
+@media (max-width: 850px) {
+  .studio.creator { padding: 24px 16px 40px; }
+  .editor-heading { align-items: flex-start; gap: 12px; }
+  .editor-heading .secondary { min-height: 40px; padding: 8px; font-size: 10px; flex-shrink: 0; }
+  .editor-mobile-tabs { display: flex; gap: 10px; margin-bottom: 16px; }
+  .editor-mobile-tabs button { flex: 1; }
+  .editor-mobile-tabs button[aria-pressed=true] { border-color: var(--orange); color: var(--orange); }
+  .editor-columns { display: block; }
+  .mobile-chat .editor-stage, .mobile-play .editor-chat { display: none; }
+  .editor-conversation { height: 37vh; min-height: 200px; }
+  .editor-empty-stage { min-height: 290px; }
+  .editor-revisions { gap: 8px; }
+  .editor-revisions label { flex-basis: 100%; }
+}
+@media (max-width: 420px) {
+  .editor-composer-bottom { align-items: flex-start; flex-direction: column; }
+  .editor-composer-bottom button { width: 100%; }
+  .editor-progress { padding: 10px; }
+  .editor-media { gap: 10px; padding: 12px; }
+}

@@ -48,3 +48,18 @@ test('undefined observations and non-finite state are rejected before JSON can s
   const invalid=await Sandbox.create(await compile(original.replace('return {x:320,','return {x:NaN,')),boot);
   try{assert.throws(()=>invalid.call('init',config),/state.x.*JSON/);}finally{invalid.dispose();}
 });
+
+test('a server CPU budget tolerates scheduling pauses while still interrupting infinite work',async()=>{
+  const code=await compile(await readFile('games/toast-catch.ts','utf8')),boot=await bootstrap();
+  let clockReads=0,pauseOnRead=Infinity,paused=false;
+  const cpuClock=()=>{
+    // Pause between the budget's start and its first interrupt check, as if the
+    // OS descheduled the runtime. Sleeping consumes wall time but almost no CPU.
+    if(++clockReads===pauseOnRead){Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,160);paused=true;}
+    const used=process.cpuUsage();return (used.user+used.system)/1000;
+  };
+  const vm=await Sandbox.create(code,boot,cpuClock);
+  pauseOnRead=clockReads+2;
+  try{vm.call('init',config);assert.equal(vm.call('step',{}).tick,1);assert.equal(paused,true);}finally{vm.dispose();}
+  await assert.rejects(()=>Sandbox.create('while(true){}',boot,cpuClock),/interrupted/);
+});

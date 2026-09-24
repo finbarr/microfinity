@@ -1,0 +1,39 @@
+[Unit]
+Description=Microfinity Blaxel game builder
+After=network-online.target postgresql.service microfinity.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=microfinity
+Group=microfinity
+WorkingDirectory=/opt/microfinity/current
+EnvironmentFile=/etc/microfinity/environment
+EnvironmentFile=/etc/microfinity/providers
+ExecStartPre=/usr/local/bin/node --import tsx scripts/check-builder-configuration.ts
+ExecStart=/usr/local/bin/node dist/server/builder-worker.js
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/microfinity/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=true
+TasksMax=128
+MemoryHigh=700M
+MemoryMax=1G
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

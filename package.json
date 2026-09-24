@@ -9,13 +9,20 @@
     "start": "node scripts/start.mjs",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "builder": "node --import tsx server/builder-worker.ts",
     "seed": "node --import tsx scripts/seed.ts",
     "test:episodes": "node --import tsx scripts/episodes.ts"
   },
   "engines": {
     "node": ">=22.12"
   },
+  "overrides": {
+    "@hey-api/json-schema-ref-parser": {
+      "js-yaml": "4.3.2"
+    }
+  },
   "dependencies": {
+    "@blaxel/core": "0.3.23",
     "@electric-sql/pglite": "0.5.8",
     "dotenv": "18.0.2",
     "express": "5.2.1",

@@ -33,6 +33,32 @@ dependencies: TypeScript and esbuild are required for runtime game generation.
 Keep `sdk`, `runtime`, `games`, `scripts`, and `server/migrations` alongside the
 build for compilation and startup. Change the completed release's owner to root.
 
+The builder uses Blaxel exclusively. Prepare and push the allowlisted toolkit with
+`scripts/prepare-blaxel-image.ts`, then pin the returned versioned image in
+`BLAXEL_BUILDER_IMAGE`. Configure `BL_WORKSPACE`, `BLAXEL_REGION=us-was-1`,
+`BUILDER_MODEL=gpt-6-sol`, `BUILDER_REASONING_EFFORT=medium`,
+`BUILDER_WORKER=external`, and matching `BUILDER_CONCURRENCY` /
+`BUILDER_WORKER_SLOTS` (start at 4). Remove retired `CODE_MODEL` and
+`GENERATION_CODE_OUTPUT_TOKENS` settings. Keep the whole-turn deadline at 900000 ms.
+
+Run `bl push` with the prepared directory as the working directory. The Blaxel
+`--directory` flag does not restrict its source archive to that directory. The
+checkout's `.blaxelignore` is an additional allowlist, not a replacement for
+building from an isolated staging folder.
+
+An explicitly approved, dedicated Blaxel service credential belongs in the
+root-owned `0600` providers file as `BL_API_KEY`; never copy personal login state.
+Credential creation and installation require separate authorization. The image
+and sandboxes receive no provider credentials. Run the read-only
+`scripts/check-builder-configuration.ts` with the service environment before
+switching releases; it verifies configuration and workspace access without printing secrets.
+
+Install `microfinity-builder.service` alongside the web unit. This process brokers
+model calls and database work while cloud VMs perform compilation and rendering.
+It shares the existing asset directory, so no remote storage migration is needed.
+The worker unit caps its memory at 1 GiB and starts only after its configuration
+check succeeds. Verify actual room load when raising concurrent turn admission.
+
 Install the service units and `backup.sh` (as
 `/usr/local/sbin/microfinity-backup`), then run `systemctl daemon-reload`.
 Point `current` at the release and start `microfinity.service`. The initial
@@ -63,10 +89,15 @@ the current party flow before publishing a new game release.
 ## Updates and recovery
 
 Run `systemctl start microfinity-backup` before switching releases. Record the
-current revision, database counts and asset hashes. Stop the app, atomically
-replace `current`, and start it again. Existing matches are interrupted by a
+current revision, database counts and asset hashes. Stop the builder and app,
+atomically replace `current`, and start the app followed by the builder. Existing matches are interrupted by a
 restart; completed results persist. Do not run a second app against the same
 database because startup reconciles interrupted jobs and matches.
+
+The project migration is additive and retains historical jobs, cartridges and
+scores. Verify its result on a separate database first. For rollback to the old
+release, stop the new builder before restoring the symlink; retain all new tables
+and data. Do not restore an old database just to roll back code.
 
 For a code rollback, restore the previous release symlink and restart after
 checking database compatibility. A code rollback should not restore an older

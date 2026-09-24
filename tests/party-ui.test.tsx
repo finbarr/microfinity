@@ -23,3 +23,13 @@ test('joiners see the shared members and host-controlled waiting state',()=>{
   assert.match(html,/Alex/);assert.match(html,/Sam/);assert.match(html,/2 \/ 4 players/);
   assert.doesNotMatch(html,/Surprise me|Start party|Pick a cartridge|Add game|I.m ready/);
 });
+
+// Native party support is an engine mode, not the old obstruction modifier.
+test('native party cartridges never show an obstruction label',async()=>{
+  const {GameCabinet}=await import('../client/GameCabinet');
+  const manifest={meta:{title:'Native game',score:{unit:'points',order:'higher'},duration:20,participation:'simultaneous',instruction:'Play'},provenance:{}} as any;
+  const html=renderToStaticMarkup(createElement(GameCabinet,{manifest,view:{},round:'ROUND 1',mode:'party-v1',children:null}));
+  assert.doesNotMatch(html,/OBSTRUCTION|Rivals press SPACE/);
+  const modified=renderToStaticMarkup(createElement(GameCabinet,{manifest,view:{},round:'ROUND 1',mode:'obstruction',children:null}));
+  assert.match(modified,/OBSTRUCTION/);
+});

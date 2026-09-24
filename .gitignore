@@ -18,3 +18,7 @@ coverage/
 playwright-report/
 .codex/
 .agents/
+
+# Requested local conversation archive; never part of a release.
+/tasks/
+/take-home.zip

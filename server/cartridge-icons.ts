@@ -12,7 +12,7 @@ export function iconPrompt({title,premise,rules,style}:IconSubject){
   return `Create one original square cover illustration for the browser microgame "${title}". Premise: ${premise}. ${rules?`Gameplay and visual cues: ${rules.slice(0,1200)}. `:''}${style?`Art direction: ${style}. `:''}Show the game's distinctive action and characters in a bold, lively composition legible at thumbnail size. Full-bleed illustration with a coherent background. No words, letters, numbers, logo, frame, watermark, interface, screenshot, or isolated transparent sprite.`;
 }
 
-export async function generateCartridgeIcon(store:Store,subject:IconSubject,context:{signal:AbortSignal;reserve:(body:unknown,tokens:number,image:boolean)=>void;jobId?:string;fetch?:typeof fetch}){
+export async function generateCartridgeIcon(store:Store,subject:IconSubject,context:{signal:AbortSignal;reserve:(body:unknown,tokens:number,image:boolean)=>void;jobId?:string;projectId?:string;fetch?:typeof fetch}){
   const model=process.env.IMAGE_MODEL??'gpt-image-1.5';
   const body={model,prompt:iconPrompt(subject),size:'1024x1024' as const,quality:'low' as const,background:'opaque' as const,output_format:'png' as const,n:1};
   context.reserve(body,0,true);
@@ -23,7 +23,7 @@ export async function generateCartridgeIcon(store:Store,subject:IconSubject,cont
   if(!encoded)throw new Error('Image model returned no cartridge icon');
   const bytes=await normalizeIcon(encoded);
   context.signal.throwIfAborted();
-  const stored=await store.putAsset(bytes,'png');
+  const stored=await store.putAsset(bytes,'png',context.projectId);
   context.signal.throwIfAborted();
   const icon:Asset={...stored,name:iconName,width:256,height:256,provenance:{kind:'image-model-icon',model,...(context.jobId?{jobId:context.jobId}:{})}};
   return {icon,model,usage:(result as any).usage??null};

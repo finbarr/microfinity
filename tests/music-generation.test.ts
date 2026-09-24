@@ -3,6 +3,8 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';import {tmpdir} from 'node:
 import {prepareMusic,symbolicMusicAdapter,type MusicOutput,type MusicGenerationAdapter} from '../server/music-generation';
 import {inspectLoop,wavBuffer} from '../server/music-assets';
 import {stockScore,synthesize} from '../runtime/music';
+import sharp from 'sharp';
+import {Projects,ProjectWorker} from '../server/projects';
 import {GenerationService} from '../server/generation';import {Store,hash} from '../server/store';import {compileIsolated} from '../server/compile-process';
 
 function renderedFixture():Extract<MusicOutput,{kind:'audio'}>{
@@ -41,7 +43,7 @@ test('rendered music rejects bad encoding, inconsistent headers, oversized or un
 
 const pause=()=>new Promise(r=>setTimeout(r,10));
 async function until<T>(check:()=>Promise<T|undefined>){const start=Date.now();for(;;){const value=await check();if(value)return value;if(Date.now()-start>20000)throw new Error('Fixture job did not settle');await pause();}}
-test('rendered adapter repairs invalid audio, pins exact files and preserves preview, rules, art and durable history',async()=>{
+test('rendered adapter repairs invalid audio and pins exact files after builder validation',async()=>{
  const priorKey=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='fixture-only';
  const root=await mkdtemp(join(tmpdir(),'microfinity-music-adapter-'));let store=new Store(root,'');await store.init();
  try{
@@ -49,20 +51,29 @@ test('rendered adapter repairs invalid audio, pins exact files and preserves pre
   const original=await store.putVersion(source,compiled.code,compiled.meta,[],null,{kind:'fixture'},guest.id,undefined,compiled.audio);
   let finish:((value:MusicOutput)=>void)|undefined;const requests:any[]=[];
   const adapter:MusicGenerationAdapter={async generate(request,context){context.reserve({title:request.title,attempt:request.attempt},0);requests.push(request);return requests.length===1?{...renderedFixture(),bytes:Buffer.from('invalid file')}:new Promise(resolve=>finish=resolve);}};
-  const service=new GenerationService(store,{},undefined,adapter);
+  const png=(await sharp({create:{width:256,height:256,channels:4,background:'#aabbcc'}}).png().toBuffer()).toString('base64');
+  const service=new GenerationService(store,{},async()=>new Response(JSON.stringify({data:[{b64_json:png}]}),{headers:{'content-type':'application/json'}}),adapter,{async build(input){return {...compiled,meta:{...compiled.meta,id:input.gameId},source,runtime:await store.runtime(original),reports:[],model:'fixture',usage:[]};}});
   (service as any).json=async()=>({title:'Toast Catch',premise:'Catch toast',clock:'realtime',minPlayers:1,maxPlayers:1,style:'cartoon',assetName:'toast',assetDescription:'Toast',musicMood:'bouncy'});
-  const job=await service.create(guest.id,'Generate a new fixture-only audio file',{remix:original.id,musicOnly:true});
-  const working=await until(async()=>{const j=await service.get(job.id,guest.id);return finish&&j.previewVersion?j:undefined;});
-  const preview=await store.version(working.previewVersion!);assert.equal(preview.manifest.music,null);assert.equal(preview.manifest.provenance.draft,true);assert.match(requests[1].previousError,/Invalid WAV/);
+  const projects=new Projects(store),worker=new ProjectWorker(projects,service);
+  const created=await projects.create(guest.id,{requestId:'music-fixture-request',prompt:'Generate a new fixture-only audio file',remix:original.id,reuseMedia:true});
+  // This fixture tests rendered audio. Reuse a saved sprite to avoid image-model semantics.
+  const sprite=await store.putAsset(Buffer.from(png,'base64'),'png',created.id);
+  await store.query('UPDATE projects SET media=$1 WHERE id=$2',[JSON.stringify({assets:[{...sprite,name:'toast',width:256,height:256}]}),created.id]);
+  worker.start();
+  const working=await until(async()=>{const p=await projects.get(created.id,guest.id);return finish?p:undefined;});
+  assert.equal(working.revisions.length,0);assert.match(requests[1].previousError,/Invalid WAV/);
   const file=renderedFixture();finish!(file);
-  const done=await until(async()=>{const j=await service.get(job.id,guest.id);return j.status!=='working'?j:undefined;});assert.equal(done.status,'ready',done.error??'Unexpected job failure');
-  assert.equal(done.budget?.reserved.calls,2);assert.equal(done.models.music,file.provenance.model);assert.equal(done.musicAttempts?.length,2);
-  const version=await store.version(done.finishedVersion!),music=version.manifest.music as any;
-  assert.notEqual(version.id,preview.id);assert.equal(version.source,original.source);assert.equal(version.code,original.code);assert.deepEqual(version.manifest.assets,original.manifest.assets);assert.equal(version.manifest.runtimeVersion,original.manifest.runtimeVersion);
+  const done=await until(async()=>{const p=await projects.get(created.id,guest.id);return p.turns[0].status!=='working'&&p.turns[0].status!=='queued'?p:undefined;});
+  await worker.close();assert.equal(done.turns[0].status,'ready',done.turns[0].error??'Unexpected turn failure');
+  const job={id:done.turns[0].id};
+  const progress=done.turns[0].progress;
+  assert.equal(progress.budget.reserved.calls,3);assert.equal(progress.models.music,file.provenance.model);assert.equal(progress.musicAttempts.length,2);
+  const version=await store.version(done.revisions[0].version_id),music=version.manifest.music as any;
+  assert.notEqual(version.id,original.id);assert.equal(version.source,original.source);assert.equal(version.code,original.code);assert.equal(version.manifest.assets[0].hash,sprite.hash);assert.equal(version.manifest.runtimeVersion,original.manifest.runtimeVersion);
   assert.equal(music.hash,hash(Buffer.from(file.bytes)));assert.equal(music.score,undefined);assert.equal(music.name,'main-loop');assert.equal(music.provenance.jobId,job.id);assert.equal(music.provenance.provider,'fixture-only');assert.equal(music.loopStart,.2);
-  assert.deepEqual(await store.version(preview.id),preview);assert.deepEqual(await store.version(original.id),original);
+  assert.deepEqual(await store.version(original.id),original);
   assert.deepEqual(await readFile(join(root,music.url)),Buffer.from(file.bytes));
   await store.close();store=new Store(root,'');await store.init();assert.deepEqual((await store.version(version.id)).manifest.music,music);
-  const [saved]=await store.query('SELECT record FROM jobs WHERE id=$1',[job.id]);assert.equal(saved.record.status,'ready');assert.equal(saved.record.finishedVersion,version.id);assert.ok(saved.record.usage.some((u:any)=>u.branch==='music-file'&&u.usage.audioSeconds===8));
+  const [saved]=await store.query('SELECT * FROM project_turns WHERE id=$1',[job.id]);assert.equal(saved.status,'ready');assert.ok(saved.progress.public.usage.some((u:any)=>u.branch==='music-file'&&u.usage.audioSeconds===8));
  }finally{await store.close();await rm(root,{recursive:true,force:true});if(priorKey===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=priorKey;}
 });

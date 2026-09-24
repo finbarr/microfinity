@@ -1,19 +1,16 @@
 import {z} from 'zod';
 
 const limitsSchema=z.object({
-  timeoutMs:z.coerce.number().int().min(1000).max(900000).default(300000),
+  timeoutMs:z.coerce.number().int().min(1000).max(900000).default(900000),
   maxCalls:z.coerce.number().int().min(1).max(16).default(8),
   maxInputBytes:z.coerce.number().int().min(1000).max(1000000).default(300000),
   maxOutputTokens:z.coerce.number().int().min(1000).max(200000).default(54000),
-  codeOutputTokens:z.coerce.number().int().min(1000).max(50000).default(13000),
-  codeAttempts:z.coerce.number().int().min(1).max(3).default(3),
   musicAttempts:z.coerce.number().int().min(1).max(2).default(2),
-  cachedJobs:z.coerce.number().int().min(1).max(256).default(32),
 });
 export type GenerationLimits=z.infer<typeof limitsSchema>;
 export type GenerationUsage={calls:number;inputBytes:number;reservedOutputTokens:number;images:number};
 export function generationLimits(overrides:Partial<GenerationLimits>={},env:NodeJS.ProcessEnv=process.env):GenerationLimits{
-  return limitsSchema.parse({timeoutMs:env.GENERATION_TIMEOUT_MS,maxCalls:env.GENERATION_MAX_CALLS,maxInputBytes:env.GENERATION_MAX_INPUT_BYTES,maxOutputTokens:env.GENERATION_MAX_OUTPUT_TOKENS,codeOutputTokens:env.GENERATION_CODE_OUTPUT_TOKENS,codeAttempts:env.GENERATION_CODE_ATTEMPTS,musicAttempts:env.GENERATION_MUSIC_ATTEMPTS,cachedJobs:env.GENERATION_CACHED_JOBS,...overrides});
+  return limitsSchema.parse({timeoutMs:env.GENERATION_TIMEOUT_MS,maxCalls:env.GENERATION_MAX_CALLS,maxInputBytes:env.GENERATION_MAX_INPUT_BYTES,maxOutputTokens:env.GENERATION_MAX_OUTPUT_TOKENS,musicAttempts:env.GENERATION_MUSIC_ATTEMPTS,...overrides});
 }
 
 /** A shared work deadline; terminal persistence is awaited separately. */
@@ -27,7 +24,7 @@ export class GenerationBudget {
     this.timer=setTimeout(()=>this.expire(),limits.timeoutMs);this.timer.unref();
   }
   get signal(){return this.controller.signal;}
-  private expire(){this.controller.abort(new Error(`Creation exceeded its ${this.limits.timeoutMs/1000}-second work deadline. Any published draft is still available.`));}
+  private expire(){this.controller.abort(new Error(`Creation exceeded its ${this.limits.timeoutMs/1000}-second work deadline. Saved media remains available for retry.`));}
   check(){if(performance.now()>=this.expiresAt&&!this.signal.aborted)this.expire();this.signal.throwIfAborted();}
   reserve(body:unknown,outputTokens:number,image=false){
     this.check();const inputBytes=Buffer.byteLength(JSON.stringify(body),'utf8'),next={calls:this.usage.calls+1,inputBytes:this.usage.inputBytes+inputBytes,reservedOutputTokens:this.usage.reservedOutputTokens+outputTokens,images:this.usage.images+Number(image)};

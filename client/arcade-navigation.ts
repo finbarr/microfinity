@@ -32,6 +32,7 @@ export function useArcadeNavigation({screen,gameplay,onBack}:{screen:string;game
       if(event.defaultPrevented||event.ctrlKey||event.metaKey||event.altKey||event.isComposing)return;
       const target=document.activeElement instanceof HTMLElement?document.activeElement:document.body;
       const modal=dialog(),scope=navigationScope(modal),items=scope?candidates(scope):[];
+      if(!modal&&target.closest('[data-editor-surface]')&&event.key!=='Escape')return;
       if(event.key==='Escape'){
         event.preventDefault();event.stopImmediatePropagation();
         if(edit.current){editMode(null);return;}

@@ -1,0 +1,11 @@
+*
+!package.json
+!package-lock.json
+!tsconfig.json
+!builder/**
+!sdk/**
+!runtime/**
+!server/compiler.ts
+!server/compile-process.ts
+!server/compile-child.ts
+!client/renderer.ts

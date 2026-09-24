@@ -2,8 +2,11 @@ import {SandboxInstance, listImageTags} from '@blaxel/core';
 
 // Read-only preflight. Never print credential values or raw provider errors.
 try {
-  for (const key of ['OPENAI_API_KEY', 'BL_WORKSPACE', 'BL_API_KEY']) {
+  for (const key of ['OPENAI_API_KEY', 'BL_WORKSPACE']) {
     if (!process.env[key]?.trim()) throw Error(`${key} is not configured`);
+  }
+  if (!process.env.BL_API_KEY?.trim() && !process.env.BL_CLIENT_CREDENTIALS?.trim()) {
+    throw Error('A Blaxel service credential is not configured');
   }
   const image = process.env.BLAXEL_BUILDER_IMAGE ?? '';
   if (!/^sandbox\/[a-z0-9][a-z0-9-]*:[a-f0-9]{20,64}$/.test(image)) {

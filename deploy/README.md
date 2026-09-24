@@ -47,7 +47,8 @@ checkout's `.blaxelignore` is an additional allowlist, not a replacement for
 building from an isolated staging folder.
 
 An explicitly approved, dedicated Blaxel service credential belongs in the
-root-owned `0600` providers file as `BL_API_KEY`; never copy personal login state.
+root-owned `0600` providers file as `BL_CLIENT_CREDENTIALS` (base64 of
+`client_id:client_secret`), or `BL_API_KEY`; never copy personal login state.
 Credential creation and installation require separate authorization. The image
 and sandboxes receive no provider credentials. Run the read-only
 `scripts/check-builder-configuration.ts` with the service environment before

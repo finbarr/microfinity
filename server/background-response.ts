@@ -5,7 +5,16 @@ import timers from 'node:timers/promises';
 const pending=(response:Response)=>response.status==='queued'||response.status==='in_progress';
 
 /** Poll long reasoning runs without holding a single HTTP request open. */
-export async function backgroundResponse(client:OpenAI,body:ResponseCreateParamsNonStreaming,signal:AbortSignal):Promise<Response>{
+export async function backgroundResponse(
+  client: OpenAI,
+  body: ResponseCreateParamsNonStreaming,
+  parentSignal: AbortSignal,
+  deadline?: {timeoutMs: number; message: string},
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = deadline && setTimeout(() => controller.abort(Error(deadline.message)), deadline.timeoutMs);
+  timer?.unref();
+  const signal = AbortSignal.any([parentSignal, controller.signal]);
   let response:Response|undefined;
   try{
     signal.throwIfAborted();
@@ -24,6 +33,8 @@ export async function backgroundResponse(client:OpenAI,body:ResponseCreateParams
       try{await client.responses.cancel(response.id,{timeout:5000,maxRetries:0});}
       catch{console.error('Could not cancel background generation response',response.id);}
     }
-    throw error;
+    throw signal.aborted ? signal.reason : error;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

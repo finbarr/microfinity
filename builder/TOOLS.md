@@ -31,4 +31,12 @@ Run `game-tool validate /work/output.ts /scratch/witnesses.json` (redirect stdou
 
 These checks do not prove requested mechanics or visual quality; inspect and play the
 game yourself. Use traces to exercise the specific mechanic in the original request.
+For ownership, compare same-seed runs with only one seat moving/jumping at a time:
+its input must directly control only its own participant, including with 1–4 seats.
+Allow physical interactions with others, but never route that input to their controls.
+For rotating/turn-based play, compare identical active-player inputs with versus
+without an off-turn player's action. Verify the advertised interference changes
+play, respects its limit, and cannot take over or skip the active player's turn.
+For competitive games, use separate winning traces per seat where needed (1+2+3+4
+is ten traces). Do not add unrelated participation points to satisfy validation.
 All checks run in the container; /kit is immutable. Only output.ts is published.

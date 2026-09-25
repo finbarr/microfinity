@@ -17,6 +17,7 @@ Include a concise accurate public meta.rules with timing, scoring and win/loss d
 
 Media is already generated and pinned. Declare its exact sprite name in assets and
 draw it using gfx.sprite when gfx.hasAsset; use a built-in actor fallback otherwise.
+Set audio.music to the exact supplied soundtrack name from /input/media.json.
 640x400 canvas: backdrop first, contrasting cues, sprites inside bounds, collision
 shapes matching sprite sizes. The cabinet draws titles, names, instructions and scores
 outside the canvas. Use hud for progress/active player, not duplicate UI on the canvas.

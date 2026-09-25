@@ -53,7 +53,10 @@ test('rendered adapter repairs invalid audio and pins exact files after builder 
   const adapter:MusicGenerationAdapter={async generate(request,context){context.reserve({title:request.title,attempt:request.attempt},0);requests.push(request);return requests.length===1?{...renderedFixture(),bytes:Buffer.from('invalid file')}:new Promise(resolve=>finish=resolve);}};
   const png=(await sharp({create:{width:256,height:256,channels:4,background:'#aabbcc'}}).png().toBuffer()).toString('base64');
   const service=new GenerationService(store,{},async()=>new Response(JSON.stringify({data:[{b64_json:png}]}),{headers:{'content-type':'application/json'}}),adapter,{async build(input){return {...compiled,meta:{...compiled.meta,id:input.gameId},source,runtime:await store.runtime(original),reports:[],model:'fixture',usage:[]};}});
-  (service as any).json=async()=>({title:'Toast Catch',premise:'Catch toast',clock:'realtime',minPlayers:1,maxPlayers:1,style:'cartoon',assetName:'toast',assetDescription:'Toast',musicMood:'bouncy'});
+  (service as any).json=async()=>({title:'Toast Catch',premise:'Catch toast',clock:'realtime',
+   playStyle:'competitive',controls:'Each player moves their own plate.',solo:'Catch toast or lose.',
+   multiplayer:'The catcher wins.',offTurn:'Not applicable: simultaneous play',
+   style:'cartoon',assetName:'toast',assetDescription:'Toast',musicMood:'bouncy'});
   const projects=new Projects(store),worker=new ProjectWorker(projects,service);
   const created=await projects.create(guest.id,{requestId:'music-fixture-request',prompt:'Generate a new fixture-only audio file',remix:original.id,reuseMedia:true});
   // This fixture tests rendered audio. Reuse a saved sprite to avoid image-model semantics.

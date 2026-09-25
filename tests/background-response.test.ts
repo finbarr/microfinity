@@ -38,7 +38,7 @@ test('deadline cancellation stops the remote job without sending an aborted sign
     creates++;return reply('queued');
   });
   const result=backgroundResponse(api,body,abort.signal);
-  const rejection=assert.rejects(result,/abort/i);
+  const rejection=assert.rejects(result,/Fixture deadline/);
   await flush();abort.abort(new Error('Fixture deadline'));
   await rejection;assert.equal(creates,1);assert.equal(cancels,1);
 });
@@ -70,4 +70,28 @@ test('terminal provider failures are returned without polling or cancellation',a
   const api=client(async()=>{calls++;return reply('incomplete',{incomplete_details:{reason:'max_output_tokens'}});});
   const result=await backgroundResponse(api,body,new AbortController().signal);
   assert.equal(result.status,'incomplete');assert.equal(result.incomplete_details?.reason,'max_output_tokens');assert.equal(calls,1);
+});
+
+test('a phase deadline cancels pending background work without aborting the turn', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const parent = new AbortController();
+  let cancels = 0, polls = 0;
+  const api = client(async (url, init) => {
+    if (String(url).endsWith('/cancel')) {
+      cancels++;
+      assert.equal(init?.signal?.aborted, false);
+      return reply('cancelled');
+    }
+    if (init?.method !== 'POST') polls++;
+    return reply('in_progress');
+  });
+  const rejection = assert.rejects(backgroundResponse(api, body, parent.signal, {
+    timeoutMs: 6000, message: 'Music generation exceeded its deadline',
+  }), /Music generation exceeded its deadline/);
+  await flush();
+  for (let i = 0; i < 3; i++) {t.mock.timers.tick(2000); await flush();}
+  await rejection;
+  assert.equal(polls, 2);
+  assert.equal(cancels, 1);
+  assert.equal(parent.signal.aborted, false, 'The next music attempt can still run');
 });

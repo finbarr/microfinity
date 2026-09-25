@@ -6,6 +6,7 @@ import {dirname} from 'node:path';
 import {createHash} from 'node:crypto';
 import {readArtifact} from './artifact.mjs';
 import {parseReasoningEffort} from './policy.mjs';
+import {GAMEPLAY_POLICY} from './gameplay-policy.mjs';
 
 const emit = event => process.stdout.write(JSON.stringify(event) + '\n');
 await mkdir('/scratch/home', {recursive: true});
@@ -113,7 +114,7 @@ try {
   const config = {
     model: process.env.BUILDER_MODEL, modelProvider: 'broker', cwd: '/work',
     approvalPolicy: 'never', sandbox: 'danger-full-access',
-    developerInstructions: await readFile('/kit/builder/INSTRUCTIONS.md', 'utf8'),
+    developerInstructions: (await readFile('/kit/builder/INSTRUCTIONS.md', 'utf8')) + '\n' + GAMEPLAY_POLICY,
   };
   let thread;
   if (previous) {

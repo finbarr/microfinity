@@ -6,7 +6,7 @@ import type {GameBuilder,BuildInput,BuildResult} from './game-builder';
 import {BlaxelGameBuilder} from './blaxel-game-builder';
 import {prepareMusic,symbolicMusicAdapter,type MusicGenerationAdapter} from './music-generation';
 export {wavBuffer} from './music-assets';
-import { z } from 'zod';
+import {briefSchema, briefPrompt, currentBrief, parseBrief} from './game-brief';
 import {GenerationBudget,generationLimits,type GenerationLimits} from './generation-budget';
 import {backgroundResponse} from './background-response';
 export type MediaState = {
@@ -35,8 +35,6 @@ export type GenerationInput = {
 };
 export type GenerationResult = {build: BuildResult; media: MediaState; usage: unknown[]};
 
-const briefSchema={type:'object',properties:{title:{type:'string'},premise:{type:'string'},clock:{type:'string',enum:['realtime','action']},style:{type:'string',enum:['pixel','cartoon','doodle','collage']},assetName:{type:'string'},assetDescription:{type:'string'},musicMood:{type:'string'}},required:['title','premise','clock','style','assetName','assetDescription','musicMood'],additionalProperties:false};
-
 /** One bounded turn. Scheduling, ownership and publication belong to Projects. */
 export class GenerationService {
   private readonly limits: GenerationLimits;
@@ -51,7 +49,11 @@ export class GenerationService {
     const budget=job.budgetController,client=new OpenAI({apiKey:process.env.OPENAI_API_KEY,timeout:60000,maxRetries:0,fetch:this.providerFetch});
     const reasoningEffort=name==='music'?'low' as const:'high' as const;
     const body={model,input:prompt,max_output_tokens:maxTokens,...(/^gpt-[56]/.test(model)?{reasoning:{effort:reasoningEffort}}:{}),text:{format:{type:'json_schema' as const,name,schema,strict:true}}};budget.reserve(body,maxTokens);
-    const response=await backgroundResponse(client,body,budget.signal);budget.check();
+    // HTTP timeouts bound each poll, not the background job. Leave time for a
+    // music retry and the game builder instead of spending the whole turn here.
+    const response=await backgroundResponse(client,body,budget.signal,name==='music'?{
+      timeoutMs:120_000,message:'Music generation exceeded its 120-second deadline',
+    }:undefined);budget.check();
     job.usage.push({branch:name,model:response.model,reasoningEffort:body.reasoning?.effort,usage:response.usage});job.models[name]=response.model;
     if(response.status!=='completed')throw new Error(`${name} generation ${response.status}: ${response.error?.message??response.incomplete_details?.reason??'no completed response'}`);
     if(!response.output_text)throw new Error(`${name} returned no usable output`);return JSON.parse(response.output_text);
@@ -85,8 +87,9 @@ export class GenerationService {
       const model=process.env.BRIEF_MODEL??'gpt-6-sol',musicModel=process.env.MUSIC_MODEL??'gpt-5-mini';
       job.branches.brief='working';await work(()=>save());
       const previous=input.parent;
-      const brief=job.brief??await work(()=>this.json(job,model,'brief',briefSchema,`Design a small, original browser microgame from this prompt. Give one clear mechanic within WASD/arrows and Space; no mouse or extra buttons. Infer realtime versus turn-based play from the prompt: use clock realtime for continuously advancing deadlines, timing or movement, even when controls are discrete button presses; use clock action for turn-based choices whose step runs on input or the engine turn deadline. Every new or rule-remixed cartridge must support one through four human players without asking the author to choose a player count. Pick one useful isolated sprite to generate with a transparent background. assetName must be lowercase letters and hyphens. ${previous?`Existing cartridge: ${previous.manifest.meta.title}. ${previous.manifest.meta.description}. Use the prior idea as remix context, while letting this prompt determine the new clock and all-party rules.`:''}\nPrompt: ${job.prompt}`,2000));
-      z.object({title:z.string().max(80),premise:z.string().min(1),clock:z.enum(['realtime','action']),assetName:z.string().regex(/^[a-z-]{1,40}$/)}).passthrough().parse(brief);
+      const brief = currentBrief(job.brief) ?? parseBrief(await work(() => this.json(
+        job, model, 'brief', briefSchema, briefPrompt(job.prompt, previous), 4000,
+      )));
       if(job.previewArt?.[0])brief.assetName=job.previewArt[0].name;
       job.brief=brief;job.title=brief.title;job.branches.brief='ready';job.timings.briefMs=Date.now()-job.startedAt;await work(()=>save());
       const gameId=input.gameId;job.buildGameId=gameId;

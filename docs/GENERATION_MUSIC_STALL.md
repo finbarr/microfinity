@@ -15,7 +15,7 @@ and brief; the new music request completed in 20 seconds. The retry became ready
 at 04:16:13 after independent game validation: 186.49 seconds total. No production
 restart, database edit, or manual retry was performed during the investigation.
 
-## Cause and local fix
+## Cause and fix
 
 The 60-second HTTP timeout applies independently to each background status poll.
 It does not bound the overall background music request. With no music-specific
@@ -34,5 +34,16 @@ recovering from stalled background music without regenerating the art or brief.
 The tests use controlled provider responses and a fake clock; they do not claim
 that the original provider-side delay was reproduced live.
 
-The fix is local and has not been deployed. Read-only production status evidence
-is retained under `artifacts/player-ownership/`.
+The fix was deployed in application release `26f84d3` on September 24, 2026
+(Pacific time). Both service processes and deployed source hashes were verified.
+Diagnosis and deployment evidence is retained under `artifacts/player-ownership/`.
+
+The fresh production acceptance run also exercised this path with a real provider:
+the first music attempt hit `Music generation exceeded its 120-second deadline`,
+the second produced a validated soundtrack, and code generation then started.
+Only five media/planning calls were reserved: one brief, one sprite, one cover,
+and two music attempts. The completed artwork was retained throughout.
+The resulting **Star Scoop** turn reached ready after 444.14 seconds, passed
+independent server validation and additional controller/gameplay probes, and
+automatically released both sandboxes. This confirms recovery through the full
+production creation flow, not only transition out of the music phase.

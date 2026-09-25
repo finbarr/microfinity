@@ -1,6 +1,6 @@
 # Multiplayer generation defaults
 
-Candidate change, September 24, 2026. Not deployed to production.
+Deployed September 24, 2026 (Pacific time), application release `26f84d3`.
 
 ## Cause
 
@@ -99,5 +99,35 @@ Local evidence is in `artifacts/player-ownership/`: the reported source and brie
 `reproduction.json`, planner outputs, sandbox source/witnesses/validation reports,
 screenshots, and probe scripts. No existing creator project was edited or published.
 
-Deployment must pair the updated server planner with the tested builder image;
-updating only the server would leave Codex's old instructions in the pinned image.
+Production pairs the updated server planner with the tested final builder image
+`sandbox/microfinity-ownership-final-20260924:b1646b63e4e3c90a087a7`.
+Both running processes were verified against the release directory, configured
+image, and exact source hashes. The immutable release was built and type-checked
+on Linux; the homepage, assets, database writes, room creation, and authenticated
+WebSocket lobby passed deployment smoke checks.
+
+Activation waited for an existing creator's turn to settle. That old-release turn
+failed with `brief generation incomplete: max_output_tokens`; it was not stopped
+by deployment. The new planner has a 4,000-token allowance, up from 2,000.
+At activation there were no queued/working turns or active matches. All 34 existing
+version source/code hashes, 232 completed results, and 51 asset hashes were retained.
+A database/assets backup and application/image rollback were prepared beforehand.
+
+Fresh production acceptance created **Star Scoop** through the normal guest/project
+API, without an explicit competitive instruction. The planner selected competitive
+play, one basket per joined controller, individual catches, and a shared sky. Turn
+`352312b700e8a309ae402069` reached ready in 444.14 seconds (7m24s), including
+a real 120-second music timeout and successful automatic retry. The builder used
+`gpt-6-sol` with medium reasoning and the pinned final image above. Independent
+server validation accepted all four player counts; the resulting source hash is
+`897707490279e373acaeb805323409cedd206f87b0c2ce75f3ffe4c58015bc88`.
+
+Separate probes of the exact accepted production version passed 30 isolated
+left/right/Space checks and ten winning runs covering every seat across 1–4
+players. Only the controlled basket moved or scooped; idle rivals scored zero and
+lost, while the active player scored only on actual catches. Three progress
+snapshot events were recorded, and the final-source screenshot was fetched and
+visually inspected. Both test sandboxes were automatically deleted and no leases
+remained. The acceptance draft stays unpublished and rejects anonymous project
+access. Evidence is in `artifacts/player-ownership/deployment/`; this acceptance
+used API creation and headless gameplay probes, not a browser gameplay session.

@@ -66,8 +66,10 @@ export class BlaxelGameBuilder implements GameBuilder {
       mark('created', {role, name: `${name}-${role}`});
       signal.throwIfAborted();
       await box.fs.writeBinary('/control/input.tar.gz', await readFile(join(directory, 'input.tar.gz')));
-      await execute(box, 'mkdir -p /bl && chown -R 10001:10001 /work /scratch && tar -xzf /control/input.tar.gz -C / && chmod -R a-w /input /media /references', `prepare-${role}`);
-      await execute(box, "/kit/builder/blaxel-run.sh sh -c 'test -w /work && test -w /scratch'", `writable-${role}`);
+      // The production worker uses umask 0077. Normalize only the uploaded VM
+      // inputs, keeping host staging private and sandbox inputs read-only.
+      await execute(box, 'mkdir -p /bl && chown -R 10001:10001 /work /scratch && tar -xzf /control/input.tar.gz -C / && chmod -R a=rX /input /media /references', `prepare-${role}`);
+      await execute(box, "/kit/builder/blaxel-run.sh sh -c 'test -w /work && test -w /scratch && test -r /input/brief.json && test -r /input/request.txt && test -r /input/media.json'", `access-${role}`);
       return box;
     };
     try {

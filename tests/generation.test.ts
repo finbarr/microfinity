@@ -12,13 +12,13 @@ const brief = {title: 'Toast', premise: 'Catch toast', clock: 'realtime', style:
   offTurn: 'Not applicable: simultaneous play',
   assetName: 'toast', assetDescription: 'Toast', musicMood: 'bouncy'};
 async function fixture(options: {music?: any; builder?: any; limits?: any; fetch?: typeof fetch} = {}) {
-  const writes: any[] = [], builds: any[] = [];
+  const writes: any[] = [], builds: any[] = [], imageRequests: any[] = [];
   const store = {putAsset: async (bytes: Buffer, extension: string, projectId: string) => {assert.equal(projectId, 'private-project'); return {hash: hash(bytes), url: `/assets/${hash(bytes)}.${extension}`};}} as unknown as Store;
   const png = (await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect x="50" y="50" width="150" height="150" fill="#abcdef"/></svg>')).png().toBuffer()).toString('base64');
-  const service = new GenerationService(store, options.limits, options.fetch ?? (async () => new Response(JSON.stringify({data: [{b64_json: png}]}), {headers: {'content-type': 'application/json'}})), options.music ?? {generate: async () => ({kind: 'score', score: stockScore('toast-catch'), provenance: {provider: 'fixture', model: 'fixture'}})}, options.builder ?? {build: async (input: any) => {builds.push(input); return {source: 'fixture', code: 'fixture', runtime: 'fixture', reports: [], model: 'fixture'};}});
+  const service = new GenerationService(store, options.limits, options.fetch ?? (async (_url, init) => {imageRequests.push(JSON.parse(String(init?.body))); return new Response(JSON.stringify({data: [{b64_json: png}]}), {headers: {'content-type': 'application/json'}});}), options.music ?? {generate: async () => ({kind: 'score', score: stockScore('toast-catch'), provenance: {provider: 'fixture', model: 'fixture'}})}, options.builder ?? {build: async (input: any) => {builds.push(input); return {source: 'fixture', code: 'fixture', runtime: 'fixture', reports: [], model: 'fixture'};}});
   (service as any).json = async () => ({...brief});
-  const input: GenerationInput = {jobId: 'turn', projectId: 'private-project', ownerId: 'owner', gameId: 'game', prompt: 'Catch toast before it falls', media: {}, signal: new AbortController().signal, onProgress: async (progress, media) => {writes.push({progress: structuredClone(progress), media: structuredClone(media)});}};
-  return {service, input, writes, builds};
+  const input: GenerationInput = {phase: 'build', jobId: 'turn', projectId: 'private-project', ownerId: 'owner', gameId: 'game', prompt: 'Catch toast before it falls', media: {}, signal: new AbortController().signal, onProgress: async (progress, media) => {writes.push({progress: structuredClone(progress), media: structuredClone(media)});}};
+  return {service, input, writes, builds, imageRequests};
 }
 
 test('media checkpoints complete before Codex; subsequent edits reuse exact media', async () => {
@@ -135,4 +135,36 @@ test('stalled background music is cancelled and retried with the saved art', asy
   assert.ok(result.media.music);
   assert.match(f.writes.at(-1).progress.musicAttempts[0].error, /120-second deadline/);
   assert.equal(f.writes.at(-1).progress.musicAttempts[1].kind, 'score');
+});
+
+
+test('art review finishes without music or a builder and approval reuses the exact images', async () => {
+  let musicCalls = 0;
+  const f = await fixture({music: {generate: async () => {
+    musicCalls++;
+    return {kind: 'score', score: stockScore('toast-catch'), provenance: {provider: 'fixture', model: 'fixture'}};
+  }}});
+  const art = await f.service.run({...f.input, phase: 'art'});
+  assert.ok(art.media.icon && art.media.assets?.length && art.media.brief);
+  assert.equal(art.media.music, undefined);
+  assert.equal(art.build, undefined);
+  assert.equal(musicCalls, 0);
+  assert.equal(f.builds.length, 0);
+  const game = await f.service.run({...f.input, media: art.media});
+  assert.deepEqual(game.media.icon, art.media.icon);
+  assert.deepEqual(game.media.assets, art.media.assets);
+  assert.deepEqual(game.media.brief, art.media.brief);
+  assert.equal(musicCalls, 1);
+  assert.equal(f.builds.length, 1);
+});
+
+
+test('latest image feedback survives a long conversation before cover cues are truncated', async () => {
+  const f = await fixture();
+  await f.service.run({...f.input, phase: 'art', prompt: 'Earlier direction. '.repeat(200),
+    artFeedback: 'A lavender sky and a sleepy dragon with silver wings.'});
+  const cover = f.imageRequests.find(request => request.background === 'opaque');
+  const sprite = f.imageRequests.find(request => request.background === 'transparent');
+  assert.match(cover.prompt, /A lavender sky and a sleepy dragon with silver wings/);
+  assert.match(sprite.prompt, /A lavender sky and a sleepy dragon with silver wings/);
 });

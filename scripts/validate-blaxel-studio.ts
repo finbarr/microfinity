@@ -39,6 +39,11 @@ async function settled(projectId: string, ownerId: string) {
     const statuses = project.turns.map(t => `${t.status}:${t.stage}`).join(',');
     if (statuses !== last) {log('progress', {projectId, statuses}); last = statuses;}
     if (project.turns.every(t => !['queued', 'working'].includes(t.status))) {
+      if (project.turns.at(-1)!.status === 'art_ready') {
+        log('approve-validation-art', {projectId});
+        await projects.build(projectId, ownerId, {requestId: id(), artTurnId: project.turns.at(-1)!.id});
+        continue;
+      }
       assert.equal(project.turns.at(-1)!.status, 'ready', project.turns.at(-1)!.error ?? 'Build failed');
       return project;
     }
@@ -62,12 +67,12 @@ try {
   await writeFile(join(directory, 'owners.private.json'), JSON.stringify(owners.map((owner, index) => ({owner, projectId: drafts[index].id}))), {mode: 0o600});
   worker.start();
   const ready = await Promise.all(drafts.map((draft, index) => settled(draft.id, owners[index].id)));
-  const turns = await store.query('SELECT id,owner_id,progress FROM project_turns ORDER BY created_at');
+  const turns = await store.query("SELECT id,owner_id,progress FROM project_turns WHERE status='ready' ORDER BY created_at");
   assert.equal(new Set(turns.map(t => t.owner_id)).size, 2);
   const lifecycles = await Promise.all(turns.map(async t => JSON.parse(await readFile(join(directory, t.id, 'lifecycle.json'), 'utf8'))));
   assert.ok(lifecycles.every(l => l.lifecycle.filter((e: any) => e.event === 'deleted').length === 2));
   // Both builds must actually overlap in their model-execution windows.
-  const timings = await store.query("SELECT min(e.created_at) AS began,t.finished_at FROM project_turns t JOIN project_events e ON e.turn_id=t.id AND e.kind='working' GROUP BY t.id ORDER BY began");
+  const timings = await store.query("SELECT min(e.created_at) AS began,t.finished_at FROM project_turns t JOIN project_events e ON e.turn_id=t.id AND e.kind='working' AND t.status='ready' GROUP BY t.id ORDER BY began");
   assert.ok(new Date(timings[1].began) < new Date(timings[0].finished_at));
   log('parallel-ready', {projects: ready.map(p => p.id), threads: turns.map(t => t.progress.builder.thread)});
   await projects.submit(ready[0].id, owners[0].id, {requestId: id(), message: 'Keep the purple sky. Change the title to Midnight Marshmallows. Preserve all mechanics and timing.'});

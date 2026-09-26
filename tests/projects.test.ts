@@ -21,23 +21,31 @@ async function until<T>(check: () => Promise<T | undefined> | T | undefined): Pr
 function result(input: GenerationInput): GenerationResult {
   return {build: {...compiled, source: source + '\n//' + input.prompt, meta: {...compiled.meta, id: input.gameId}, runtime, reports: [{ok: true}], model: 'fixture', usage: [], witnesses: []}, media: {...input.media, title: 'Toast studio'}, usage: []};
 }
-async function fixture(t: any, pipeline?: TurnPipeline) {
+async function fixture(t: any, pipeline?: TurnPipeline, artPipeline?: TurnPipeline) {
   const root = await mkdtemp(join(tmpdir(), 'microfinity-projects-'));
   const store = new Store(root, ''); await store.init();
   const a = await store.guest(undefined, 'Alice'), b = await store.guest(undefined, 'Bob');
   const projects = new Projects(store);
-  const worker = new ProjectWorker(projects, pipeline ?? {run: async input => result(input)}, {concurrency: 2, leaseMs: 3000});
+  const artAsset = {hash: 'c'.repeat(64), url: `/assets/${'c'.repeat(64)}.png`, name: 'toast', width: 256, height: 256};
+  const worker = new ProjectWorker(projects, {run: async input => input.phase === 'art'
+    ? artPipeline ? artPipeline.run(input) : {media: {brief: {title: 'Toast studio'}, title: 'Toast studio', assets: [artAsset], icon: artAsset, ...input.media}, usage: []}
+    : pipeline ? pipeline.run(input) : result(input)}, {concurrency: 2, leaseMs: 3000});
   t.after(async () => {await worker.close(); await store.close(); await rm(root, {recursive: true, force: true});});
-  const create = (owner = a.id) => projects.create(owner, {requestId: id(), prompt: 'Catch toast before it hits the floor.'});
+  const createArt = (owner = a.id) => projects.create(owner, {requestId: id(), prompt: 'Catch toast before it hits the floor.'});
+  const create = async (owner = a.id) => {
+    const project = await createArt(owner);
+    await (worker as any).execute((await worker.claim())!, new AbortController());
+    return projects.build(project.id, owner, {requestId: id(), artTurnId: project.turns[0].id});
+  };
   const settled = (project: string, owner = a.id) => until(async () => {
     const p = await projects.get(project, owner);
     return p.turns.every(t => !['working','queued'].includes(t.status)) ? p : undefined;
   });
-  return {root, store, a, b, projects, worker, create, settled};
+  return {root, store, a, b, projects, worker, create, createArt, settled};
 }
 
 test('sandbox cleanup fences leases, retains late-allocation tombstones, and retries deletion failures', async t => {
-  const f = await fixture(t), project = await f.create();
+  const f = await fixture(t), project = await f.createArt();
   const turn = (await f.worker.claim())!;
   const deleted: string[] = [];
   let fail = false;
@@ -75,6 +83,7 @@ test('idempotent creation and messages reject conflicting reuse; short follow-up
   const [one, duplicate] = await Promise.all([f.projects.create(f.a.id, request), f.projects.create(f.a.id, request)]);
   assert.equal(one.id, duplicate.id);
   await assert.rejects(() => f.projects.create(f.a.id, {...request, prompt: 'A different idea entirely'}), /different idea/);
+  await (f.worker as any).execute((await f.worker.claim())!, new AbortController());
   const change = {requestId: id(), message: 'slower'};
   await f.projects.submit(one.id, f.a.id, change); await f.projects.submit(one.id, f.a.id, change);
   assert.equal((await f.projects.get(one.id, f.a.id)).turns.length, 2);
@@ -84,7 +93,7 @@ test('idempotent creation and messages reject conflicting reuse; short follow-up
 });
 
 test('event replay orders numeric cursors across digit boundaries and pages', async t => {
-  const f = await fixture(t), project = await f.create();
+  const f = await fixture(t), project = await f.createArt();
   await f.store.query("INSERT INTO project_events(project_id,kind,payload) SELECT $1,'fixture','{}'::jsonb FROM generate_series(1,130)", [project.id]);
   const first = await f.projects.events(project.id, f.a.id, 0);
   assert.equal(first.length, 100);
@@ -102,7 +111,7 @@ test('retry preserves regenerated media checkpoints and original playtest feedba
     calls++;
     if (calls === 1) return {...result(input), media: {assets: [oldArt]}};
     if (calls === 2) {
-      assert.equal(input.media.assets, undefined);
+      assert.equal(input.media.music, undefined);
       replay = input.feedback;
       await input.onProgress({branches: {art: 'ready', code: 'working'}}, {assets: [newArt]});
       throw Error('Interrupted after artwork');
@@ -113,7 +122,7 @@ test('retry preserves regenerated media checkpoints and original playtest feedba
   }});
   const project = await f.create(); f.worker.start();
   const initial = await f.settled(project.id);
-  await f.projects.submit(project.id, f.a.id, {requestId: id(), message: 'Blue toast', regenerateArt: true,
+  await f.projects.submit(project.id, f.a.id, {requestId: id(), message: 'Blue toast', regenerateMusic: true,
     feedback: {revisionId: initial.selected_revision, players: 1, seed: 1, steps: []}});
   const failed = await f.settled(project.id), retryOf = failed.turns.at(-1)!.id;
   assert.equal(failed.turns.at(-1)!.status, 'failed');
@@ -128,11 +137,12 @@ test('two owners execute concurrently; one project has one writer and later turn
   const waiting: {input: GenerationInput; finish: () => void}[] = [];
   const f = await fixture(t, {run: input => new Promise(resolve => waiting.push({input, finish: () => resolve(result(input))}))});
   const a = await f.create(), b = await f.create(f.b.id);
-  await f.projects.submit(a.id, f.a.id, {requestId: id(), message: 'Make it faster'});
+  await assert.rejects(() => f.projects.submit(a.id, f.a.id, {requestId: id(), message: 'Make it faster'}), /finish/);
   f.worker.start(); await until(() => waiting.length === 2 ? true : undefined);
   assert.equal(new Set(waiting.map(w => w.input.ownerId)).size, 2);
-  assert.equal((await f.projects.get(a.id, f.a.id)).turns[1].status, 'queued');
   for (const pending of waiting.slice()) pending.finish();
+  await f.settled(a.id);
+  await f.projects.submit(a.id, f.a.id, {requestId: id(), message: 'Make it faster'});
   await until(() => waiting.length === 3 ? true : undefined);
   assert.ok(waiting[2].input.parent, 'queued edit resolved its base after creation finished');
   waiting[2].finish();
@@ -144,7 +154,7 @@ test('draft source, media, events and references stay owner-only; publication pr
   const f = await fixture(t);
   const project = await f.create();
   const privateAsset = await f.store.putAsset(Buffer.from('private fixture bytes'), 'png', project.id);
-  await f.store.query('UPDATE projects SET media=$1 WHERE id=$2', [JSON.stringify({assets: [{...privateAsset, name: 'toast', width: 1, height: 1}]}), project.id]);
+  await f.store.query("UPDATE project_turns SET progress=jsonb_set(progress,'{media,assets}',$1::jsonb) WHERE id=$2", [JSON.stringify([{...privateAsset, name: 'toast', width: 1, height: 1}]), project.turns[0].id]);
   f.worker.start(); const ready = await f.settled(project.id), revision = ready.revisions[0];
   assert.equal((await f.store.library()).length, 0);
   await assert.rejects(() => f.projects.get(project.id, f.b.id), /not found/);
@@ -190,10 +200,10 @@ test('cancellation fences even a pipeline that ignores abort and returns late', 
   let input: GenerationInput | undefined, finish!: (value: GenerationResult) => void;
   const f = await fixture(t, {run: async value => {input = value; return new Promise(resolve => {finish = resolve;});}});
   const project = await f.create(); f.worker.start(); await until(() => input);
-  await f.projects.cancel(project.id, f.a.id, project.turns[0].id);
+  await f.projects.cancel(project.id, f.a.id, project.turns.at(-1)!.id);
   finish(result(input!)); await pause(50);
   const stopped = await f.projects.get(project.id, f.a.id);
-  assert.equal(stopped.turns[0].status, 'cancelled'); assert.equal(stopped.revisions.length, 0);
+  assert.equal(stopped.turns.at(-1)!.status, 'cancelled'); assert.equal(stopped.revisions.length, 0);
   assert.equal((await f.store.query('SELECT id FROM versions')).length, 0);
 });
 
@@ -202,11 +212,11 @@ test('expired leases are retried with a new generation; healthy jobs survive sto
   const first = await f.worker.claim(), healthy = await f.worker.claim();
   assert.ok(first && healthy);
   await f.store.init({recoverMatches: false});
-  assert.equal((await f.projects.get(b.id, f.b.id)).turns[0].status, 'working');
+  assert.equal((await f.projects.get(b.id, f.b.id)).turns.at(-1)!.status, 'working');
   await f.store.query("UPDATE project_turns SET lease_until=now()-interval '1 second' WHERE id=$1", [first.id]);
   const next = await f.worker.claim(); assert.equal(next!.id, first.id); assert.ok(next!.generation > first.generation);
   await assert.rejects(() => (f.worker as any).fenced(first, async () => {}), /lease/);
-  assert.equal((await f.projects.get(a.id, f.a.id)).turns[0].attempts, undefined, 'private worker bookkeeping is absent from API');
+  assert.equal((await f.projects.get(a.id, f.a.id)).turns.at(-1)!.attempts, undefined, 'private worker bookkeeping is absent from API');
   const events = await f.projects.events(a.id, f.a.id, 0), cursor = Number(events[1].id);
   assert.ok((await f.projects.events(a.id, f.a.id, cursor)).every(event => Number(event.id) > cursor));
 });
@@ -223,4 +233,99 @@ test('selection changes fence automatic selection of a late edit', async t => {
   await f.projects.select(project.id, f.a.id, first.id); finish!();
   const done = await f.settled(project.id);
   assert.equal(done.revisions.length, 2); assert.equal(done.selected_revision, first.id);
+});
+
+test('art review survives reopening, allocates no build, and only its owner can approve once', async t => {
+  let builds = 0;
+  const f = await fixture(t, {run: async input => {builds++; return result(input);}});
+  const created = await f.createArt();
+  f.worker.start();
+  const art = await f.settled(created.id);
+  assert.equal(art.turns[0].status, 'art_ready');
+  assert.equal(art.revisions.length, 0);
+  assert.equal(builds, 0);
+  assert.equal((await f.store.query('SELECT id FROM versions')).length, 0);
+  assert.equal((await f.store.query('SELECT name FROM builder_sandboxes')).length, 0);
+  await f.store.init({recoverMatches: false});
+  assert.equal((await f.projects.get(art.id, f.a.id)).turns[0].status, 'art_ready');
+  assert.equal((await f.projects.list(f.a.id))[0].status, 'art_ready');
+  const approval = {requestId: id(), artTurnId: art.turns[0].id};
+  await assert.rejects(() => f.projects.build(art.id, f.b.id, approval), /not found/);
+  const [first, second] = await Promise.all([f.projects.build(art.id, f.a.id, approval), f.projects.build(art.id, f.a.id, approval)]);
+  assert.equal(first.turns.length, 2);
+  assert.equal(second.turns.length, 2);
+  await assert.rejects(() => f.projects.build(art.id, f.a.id, {...approval, requestId: id()}), /artwork changed/);
+  const built = await f.settled(art.id);
+  assert.equal(builds, 1);
+  assert.equal(built.revisions.length, 1);
+  assert.deepEqual(built.revisions[0].manifest.assets, art.media.assets);
+  assert.deepEqual(built.revisions[0].manifest.icon, art.media.icon);
+});
+
+test('cover-only feedback retains gameplay art and stale approvals cannot build it', async t => {
+  let cover = 0, sprites = 0;
+  const make = (n: number) => ({hash: String(n).repeat(64), url: `/assets/${String(n).repeat(64)}.png`, name: 'toast', width: 256, height: 256});
+  const f = await fixture(t, undefined, {run: async input => {
+    assert.equal(input.phase, 'art');
+    return {usage: [], media: {brief: {title: 'Toast'}, title: 'Toast',
+      assets: input.media.assets ?? [make(++sprites)], icon: input.media.icon ?? make(++cover + 4)}};
+  }});
+  const created = await f.createArt(); f.worker.start();
+  const original = await f.settled(created.id);
+  await f.projects.submit(created.id, f.a.id, {requestId: id(), message: 'A lavender sky, please', artTarget: 'cover'});
+  await assert.rejects(() => f.projects.build(created.id, f.a.id, {requestId: id(), artTurnId: original.turns[0].id}), /artwork changed/);
+  const changed = await f.settled(created.id);
+  assert.equal(changed.turns.at(-1)!.status, 'art_ready');
+  assert.equal(changed.revisions.length, 0);
+  assert.deepEqual(changed.media.assets, original.media.assets);
+  assert.notEqual(changed.media.icon!.hash, original.media.icon!.hash);
+  assert.equal(sprites, 1); assert.equal(cover, 2);
+  await assert.rejects(() => f.projects.build(created.id, f.a.id, {requestId: id(), artTurnId: original.turns[0].id}), /artwork changed/);
+  const other = await f.createArt(f.b.id);
+  await assert.rejects(() => f.projects.build(created.id, f.a.id, {requestId: id(), artTurnId: other.turns[0].id}), /artwork changed/);
+  await f.projects.build(created.id, f.a.id, {requestId: id(), artTurnId: changed.turns.at(-1)!.id});
+  const done = await f.settled(created.id);
+  assert.equal(done.turns.at(-1)!.status, 'ready');
+  assert.deepEqual(done.revisions[0].manifest.icon, changed.media.icon);
+  assert.throws(() => turnSchema.parse({requestId: id(), message: 'skip review', phase: 'build'}));
+});
+
+test('art failures retry their completed sprite without crossing into the game builder', async t => {
+  const asset = {hash: 'a'.repeat(64), url: `/assets/${'a'.repeat(64)}.png`, name: 'toast', width: 256, height: 256};
+  let calls = 0;
+  const f = await fixture(t, {run: async () => {throw Error('Must not build');}}, {run: async input => {
+    calls++;
+    if (calls === 1) {
+      await input.onProgress({branches: {art: 'ready', icon: 'failed'}}, {assets: [asset], brief: {title: 'Toast'}});
+      throw Error('Cover interrupted');
+    }
+    assert.deepEqual(input.media.assets, [asset]);
+    return {usage: [], media: {...input.media, icon: asset}};
+  }});
+  const created = await f.createArt(); f.worker.start();
+  const failed = await f.settled(created.id);
+  assert.equal(failed.turns[0].status, 'failed');
+  await f.projects.submit(created.id, f.a.id, {requestId: id(), message: failed.turns[0].message, retryOf: failed.turns[0].id});
+  const retried = await f.settled(created.id);
+  assert.equal(retried.turns.at(-1)!.status, 'art_ready');
+  assert.equal(retried.revisions.length, 0);
+  assert.equal(calls, 2);
+});
+
+test('stopped approved builds retry with the approved media and cannot silently replace it', async t => {
+  let calls = 0;
+  const f = await fixture(t, {run: async input => {
+    calls++;
+    if (calls === 1) throw Error('Build interrupted');
+    return result(input);
+  }});
+  const created = await f.create(); f.worker.start();
+  const failed = await f.settled(created.id), last = failed.turns.at(-1)!;
+  assert.equal(last.status, 'failed');
+  const approved = structuredClone(failed.media);
+  await f.projects.submit(created.id, f.a.id, {requestId: id(), message: last.message, retryOf: last.id});
+  const done = await f.settled(created.id);
+  assert.equal(done.turns.at(-1)!.status, 'ready');
+  assert.deepEqual(done.revisions[0].manifest.assets, approved.assets);
+  assert.deepEqual(done.revisions[0].manifest.icon, approved.icon);
 });

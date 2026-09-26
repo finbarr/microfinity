@@ -16,12 +16,16 @@ const source=await readFile('games/toast-catch.ts','utf8'),compiled=await compil
 if(process.argv.includes('--worker')){
   const store=new Store(process.env.STUDIO_TEST_DATA_DIR!,url);await store.init({recoverMatches:false});
   const worker=new ProjectWorker(new Projects(store),{async run(input){
-    await input.onProgress({branches:{code:'working'}},{});
+    if (input.phase === 'art') {
+      const art={hash:'a'.repeat(64),url:`/assets/${'a'.repeat(64)}.png`,name:'toast',width:1,height:1};
+      return {media:{brief:{title:'Toast'},icon:art,assets:[art]},usage:[]};
+    }
+    await input.onProgress({branches:{code:'working'}},input.media);
     await new Promise<void>((resolve,reject)=>{
       const timer=setTimeout(resolve,2000);
       input.signal.addEventListener('abort',()=>{clearTimeout(timer);reject(input.signal.reason);},{once:true});
     });
-    return {media:{},usage:[],build:{...compiled,meta:{...compiled.meta,id:input.gameId},source,runtime,reports:[{fixture:true}],model:'queue-fixture',usage:[]}};
+    return {media:input.media,usage:[],build:{...compiled,meta:{...compiled.meta,id:input.gameId},source,runtime,reports:[{fixture:true}],model:'queue-fixture',usage:[]}};
   }},{concurrency:4,slots:2,leaseMs:1800});
   worker.start();console.log(JSON.stringify({workerId:worker.workerId}));
   process.once('SIGTERM',()=>void worker.close().then(()=>store.close()));
@@ -43,7 +47,11 @@ if(process.argv.includes('--worker')){
     let killed=false,killedTurns:string[]=[],healthyId:string|undefined,maxActive=0;
     const deadline=Date.now()+45000;
     for(;;){
-      const rows=await store.query('SELECT id,status,worker_id,attempts FROM project_turns ORDER BY created_at,id');
+      for (const [index, game] of games.entries()) {
+        const p=await projects.get(game.id,owners[index].id);
+        if(p.turns.at(-1)?.status==='art_ready')await projects.build(p.id,owners[index].id,{requestId:id(),artTurnId:p.turns.at(-1)!.id});
+      }
+      const rows=await store.query("SELECT id,status,worker_id,attempts FROM project_turns WHERE options->>'phase'='build' ORDER BY created_at,id");
       const working=rows.filter(row=>row.status==='working');maxActive=Math.max(maxActive,working.length);
       samples.push({time:Date.now(),active:working.length,ready:rows.filter(row=>row.status==='ready').length});
       if(!killed&&new Set(working.map(row=>row.worker_id)).size===2){
@@ -55,7 +63,7 @@ if(process.argv.includes('--worker')){
         a.kill('SIGKILL');killed=true;
       }
       assert.ok(working.length<=4,'global active cap');
-      if(rows.every(row=>row.status==='ready')){
+      if(rows.length===games.length&&rows.every(row=>row.status==='ready')){
         assert.ok(killed&&killedTurns.length);
         assert.ok(rows.filter(row=>killedTurns.includes(row.id)).every(row=>row.attempts===2),'killed process turns recovered once');
         assert.equal(rows.find(row=>row.id===healthyId).attempts,1,'healthy worker was not restarted');

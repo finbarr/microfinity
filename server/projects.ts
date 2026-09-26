@@ -23,9 +23,12 @@ export const turnSchema = z.object({
   requestId, message: z.string().trim().min(1).max(600),
   regenerateArt: z.boolean().default(false),
   regenerateMusic: z.boolean().default(false),
+  artTarget: z.enum(['all', 'cover', 'sprite']).default('all'),
   retryOf: revisionId.optional(),
   feedback: feedbackSchema.optional(),
 }).strict();
+const buildSchema = z.object({requestId, artTurnId: revisionId}).strict();
+type TurnOptions = z.infer<typeof turnSchema> & {phase?: 'art' | 'build'; approvedArt?: string};
 export type Project = {
   id: string; owner_id: string; title: string; idea: string; game_id: string;
   selected_revision: string | null; published_revision: string | null;
@@ -33,7 +36,7 @@ export type Project = {
 };
 export type Turn = {
   id: string; project_id: string; owner_id: string; message: string;
-  status: string; options: z.infer<typeof turnSchema>; base_revision: string | null;
+  status: string; options: TurnOptions; base_revision: string | null;
   worker_id: string | null; generation: number; selection_epoch: number;
   attempts: number; progress: any; revision_id: string | null;
 };
@@ -80,11 +83,13 @@ export class Projects {
       await this.admission(query, ownerId);
       const project = id(), turn = id();
       const media = previous && input.reuseMedia ? this.versionMedia(previous) : {};
+      // A remix can keep its cast and soundtrack, but gets its own cover.
+      delete media.icon;
       await query('INSERT INTO projects(id,owner_id,title,idea,game_id,media,remix) VALUES($1,$2,$3,$4,$5,$6,$7)',
         [project, ownerId, previous?.manifest.meta.title ?? 'Your new game', input.prompt, `creation-${project}`, JSON.stringify(media), previous?.id ?? null]);
       await query('INSERT INTO project_requests(owner_id,request_id,request_hash,project_id) VALUES($1,$2,$3,$4)', [ownerId, input.requestId, fingerprint, project]);
       await query('INSERT INTO project_turns(id,project_id,owner_id,request_id,request_hash,message,options) VALUES($1,$2,$3,$4,$5,$6,$7)',
-        [turn, project, ownerId, input.requestId, fingerprint, input.prompt, '{}']);
+        [turn, project, ownerId, input.requestId, fingerprint, input.prompt, JSON.stringify({phase: 'art'})]);
       await this.event(query, project, 'message', {role: 'user', text: input.prompt}, turn);
       await this.event(query, project, 'queued', {}, turn);
       return project;
@@ -105,13 +110,21 @@ export class Projects {
       await this.admission(query, ownerId);
       const [count] = await query('SELECT count(*)::int AS count FROM project_turns WHERE project_id=$1', [projectId]);
       if (count.count >= 20 || project.attempts >= 24) throw Error('This project has reached its edit allowance');
-      let options = input;
+      const [latest] = await query('SELECT status,options FROM project_turns WHERE project_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1', [projectId]);
+      const reviewingArt = !project.selected_revision || latest?.options.phase === 'art';
+      let options: TurnOptions = {...input, phase: reviewingArt || input.regenerateArt ? 'art' : 'build'};
       if (input.retryOf) {
         const [retry] = await query("SELECT message,options FROM project_turns WHERE id=$1 AND project_id=$2 AND status IN ('failed','cancelled')", [input.retryOf, projectId]);
         if (!retry) throw Error('Only a stopped edit in this project can be retried');
         if (input.message !== retry.message) throw Error('A retry must keep the original edit request');
-        options = {...input, regenerateArt: retry.options.regenerateArt === true,
+        options = {...input, phase: retry.options.phase ?? options.phase, approvedArt: retry.options.approvedArt,
+          regenerateArt: retry.options.regenerateArt === true, artTarget: retry.options.artTarget ?? 'all',
           regenerateMusic: retry.options.regenerateMusic === true, feedback: retry.options.feedback};
+      }
+      if (options.phase === 'art') {
+        const [pending] = await query(`SELECT id FROM project_turns WHERE project_id=$1 AND ${active} LIMIT 1`, [projectId]);
+        if (pending) throw Error('Let this step finish before changing the artwork');
+        if (!input.retryOf) options.regenerateArt = true;
       }
       if (input.feedback) {
         const [revision] = await query('SELECT id FROM project_revisions WHERE id=$1 AND project_id=$2', [input.feedback.revisionId, projectId]);
@@ -127,9 +140,37 @@ export class Projects {
     return this.get(projectId, ownerId);
   }
 
+  async build(projectId: string, ownerId: string, raw: unknown) {
+    const input = buildSchema.parse(raw), fingerprint = hash(JSON.stringify(input));
+    await this.store.transaction(async query => {
+      await query('SELECT id FROM builder_admission WHERE id=1 FOR UPDATE');
+      const project = await this.owned(projectId, ownerId, query);
+      const [existing] = await query('SELECT request_hash FROM project_turns WHERE project_id=$1 AND request_id=$2', [projectId, input.requestId]);
+      if (existing) {
+        if (existing.request_hash !== fingerprint) throw Error('That request ID was already used for a different edit');
+        return;
+      }
+      const [art] = await query('SELECT * FROM project_turns WHERE project_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1', [projectId]);
+      if (!art || art.id !== input.artTurnId || art.status !== 'art_ready') throw Error('The artwork changed. Review the latest cartridge before building.');
+      if (art.base_revision !== project.selected_revision) throw Error('The selected game changed. Refresh the artwork before building.');
+      if (!art.progress?.media?.icon || !art.progress?.media?.assets?.length || !art.progress?.media?.brief) throw Error('The artwork is not ready yet');
+      await this.admission(query, ownerId);
+      const [count] = await query('SELECT count(*)::int AS count FROM project_turns WHERE project_id=$1', [projectId]);
+      if (count.count >= 20 || project.attempts >= 24) throw Error('This project has reached its edit allowance');
+      const turn = id();
+      await query('INSERT INTO project_turns(id,project_id,owner_id,request_id,request_hash,message,options) VALUES($1,$2,$3,$4,$5,$6,$7)',
+        [turn, projectId, ownerId, input.requestId, fingerprint, art.message,
+          JSON.stringify({phase: 'build', approvedArt: art.id, feedback: art.options.feedback})]);
+      await this.event(query, projectId, 'art_approved', {artTurnId: art.id}, turn);
+      await this.event(query, projectId, 'queued', {}, turn);
+      await query('UPDATE projects SET updated_at=now() WHERE id=$1', [projectId]);
+    });
+    return this.get(projectId, ownerId);
+  }
+
   async get(projectId: string, ownerId: string) {
     const project = await this.owned(projectId, ownerId);
-    const turns = await this.store.query('SELECT id,message,status,stage,error,revision_id,created_at,finished_at,progress FROM project_turns WHERE project_id=$1 ORDER BY created_at,id', [projectId]);
+    const turns = await this.store.query("SELECT id,message,status,stage,error,revision_id,created_at,finished_at,progress,options->>'phase' AS phase FROM project_turns WHERE project_id=$1 ORDER BY created_at,id", [projectId]);
     const revisions = await this.store.query('SELECT r.id,r.version_id,r.parent_id,r.message,r.created_at,v.manifest FROM project_revisions r JOIN versions v ON v.id=r.version_id WHERE r.project_id=$1 ORDER BY r.created_at,r.id', [projectId]);
     const [position] = await this.store.query("SELECT count(*)::int AS count FROM project_turns WHERE status='queued' AND created_at<(SELECT min(created_at) FROM project_turns WHERE project_id=$1 AND status='queued')", [projectId]);
     const {owner_id, ...safe} = project;
@@ -137,7 +178,7 @@ export class Projects {
   }
 
   async list(ownerId: string) {
-    return this.store.query('SELECT id,title,selected_revision,published_revision,updated_at FROM projects WHERE owner_id=$1 ORDER BY updated_at DESC LIMIT 50', [ownerId]);
+    return this.store.query("SELECT id,title,selected_revision,published_revision,updated_at,(SELECT status FROM project_turns WHERE project_id=projects.id ORDER BY created_at DESC,id DESC LIMIT 1) AS status FROM projects WHERE owner_id=$1 ORDER BY updated_at DESC LIMIT 50", [ownerId]);
   }
 
   async events(projectId: string, ownerId: string, after: number) {
@@ -274,13 +315,28 @@ export class ProjectWorker {
       const [base] = turn.base_revision ? await this.store.query('SELECT * FROM project_revisions WHERE id=$1 AND project_id=$2', [turn.base_revision, project.id]) : [];
       const parent = base ? await this.store.version(base.version_id) : project.remix ? await this.store.visibleVersion(project.remix, turn.owner_id) : undefined;
       let media: MediaState = base ? this.projects.versionMedia(parent!) : project.media;
+      const phase = turn.options.phase ?? (base ? 'build' : 'art');
+      if (phase === 'art' && base) {
+        const [priorArt] = await this.store.query("SELECT progress,base_revision FROM project_turns WHERE project_id=$1 AND status='art_ready' ORDER BY created_at DESC,id DESC LIMIT 1", [project.id]);
+        if (priorArt?.base_revision === turn.base_revision) media = priorArt.progress.media;
+      }
+      if (turn.options.approvedArt) {
+        const [approved] = await this.store.query("SELECT progress FROM project_turns WHERE id=$1 AND project_id=$2 AND status='art_ready'", [turn.options.approvedArt, project.id]);
+        if (!approved) throw Error('Approved artwork not found');
+        media = approved.progress.media;
+      } else if (phase === 'build' && !base) throw Error('Review the artwork before building');
       let checkpoint = turn.attempts > 1 ? turn.progress?.media : undefined;
       if (turn.options.retryOf) {
         const [previous] = await this.store.query('SELECT progress FROM project_turns WHERE id=$1 AND project_id=$2', [turn.options.retryOf, project.id]);
         checkpoint ??= previous?.progress?.media;
       }
       media = {...(checkpoint ?? media)};
-      if (!checkpoint && turn.options.regenerateArt) {delete media.assets; delete media.icon; delete media.brief;}
+      const priorBrief = media.brief;
+      if (!checkpoint && turn.options.regenerateArt) {
+        if (turn.options.artTarget !== 'cover') delete media.assets;
+        if (turn.options.artTarget !== 'sprite') delete media.icon;
+        delete media.brief;
+      }
       if (!checkpoint && turn.options.regenerateMusic) {delete media.music; delete media.brief;}
       const history = turn.base_revision ? await this.store.query(`WITH RECURSIVE ancestors AS (
         SELECT id,parent_id,message,created_at FROM project_revisions WHERE id=$1 AND project_id=$2
@@ -291,14 +347,20 @@ export class ProjectWorker {
         const [reported]=await this.store.query('SELECT v.id,v.source FROM project_revisions r JOIN versions v ON v.id=r.version_id WHERE r.id=$1 AND r.project_id=$2',[turn.options.feedback.revisionId,project.id]);
         feedback={...turn.options.feedback,versionId:reported.id,source:reported.source};
       }
-      const prompt = `Original idea: ${project.idea}\nCompleted requests (the selected source is authoritative after undo):\n${history.map(row => row.message).join('\n')}\nCurrent request: ${turn.message}`;
+      const artHistory = await this.store.query("SELECT message FROM project_turns WHERE project_id=$1 AND status='art_ready' ORDER BY created_at,id LIMIT 20", [project.id]);
+      const artContext = phase === 'art' && priorBrief
+        ? `Previous design (preserve its mechanics and visual choices unless this request changes them):\n${JSON.stringify(priorBrief)}\nArtwork to change: ${turn.options.artTarget ?? 'all'}.`
+        : '';
+      const prompt = `Original idea: ${project.idea}\nArtwork direction:\n${artHistory.map(row => row.message).join('\n')}\n${artContext}\nCompleted requests (the selected source is authoritative after undo):\n${history.map(row => row.message).join('\n')}\nCurrent request: ${turn.message}`;
       const result = await this.pipeline.run({
+        phase,
+        artFeedback: phase === 'art' ? turn.message : undefined,
         jobId: turn.id, projectId: project.id, ownerId: turn.owner_id, gameId: project.game_id, leaseTag: `${this.workerId}:${turn.generation}`,
         prompt, parent, media, signal: controller.signal, session: base?.session&&JSON.stringify(base.session).length<650000?base.session:undefined,
         witnesses: base?.witnesses, feedback,
         onProgress: async (progress, savedMedia) => {
           controller.signal.throwIfAborted();
-          const stage = progress.branches.code === 'checking' ? 'validating' : progress.branches.code === 'working' ? 'building' : 'media';
+          const stage = phase === 'art' ? 'art' : progress.branches.code === 'checking' ? 'validating' : progress.branches.code === 'working' ? 'building' : 'media';
           await this.fenced(turn, async query => {
             await query('UPDATE project_turns SET stage=$1,progress=$2 WHERE id=$3', [stage, JSON.stringify({public: progress, media: savedMedia}), turn.id]);
             await query('UPDATE projects SET media=$1,title=$2,updated_at=now() WHERE id=$3', [JSON.stringify(savedMedia), savedMedia.title ?? project.title, project.id]);
@@ -315,6 +377,17 @@ export class ProjectWorker {
         },
       });
       controller.signal.throwIfAborted();
+      if (phase === 'art') {
+        if (result.build) throw Error('Artwork review cannot complete a game build');
+        const saved = result.media;
+        if (!saved.icon || !saved.assets?.length || !saved.brief) throw Error('Artwork is incomplete');
+        await this.fenced(turn, async query => {
+          await query("UPDATE project_turns SET status='art_ready',stage='art_ready',finished_at=now(),lease_until=NULL,progress=jsonb_set(progress,'{media}',$1::jsonb,true) WHERE id=$2", [JSON.stringify(saved), turn.id]);
+          await query('UPDATE projects SET media=$1,title=$2,updated_at=now() WHERE id=$3', [JSON.stringify(saved), saved.title ?? project.title, project.id]);
+          await this.projects.event(query, project.id, 'art_ready', {}, turn.id);
+        });
+        return;
+      }
       await this.complete(turn, result);
     } catch (error) {
       await this.fenced(turn, async query => {
@@ -327,6 +400,7 @@ export class ProjectWorker {
 
   private async complete(turn: Turn, result: GenerationResult) {
     const {build, media} = result;
+    if (!build) throw Error('The game builder returned no game');
     const runtime = await this.store.putAsset(Buffer.from(build.runtime), 'js', turn.project_id);
     const versionId = hash(JSON.stringify({source: build.source, code: build.code, meta: build.meta,
       assets: media.assets, music: media.music, icon: media.icon, audio: build.audio, runtime: runtime.hash}));

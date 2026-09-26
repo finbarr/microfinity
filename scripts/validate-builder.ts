@@ -23,7 +23,11 @@ try{
   }else project=await projects.create(owner.id,{requestId:id(),prompt:process.argv.slice(2).join(' ')||'A sleepy dragon catches falling marshmallows. Move left and right, press Space to catch one in your mouth, and catch three to win.'});
   await writeFile(resolve(directory,'owner.private.json'),JSON.stringify({owner,projectId:project.id}),{mode:0o600});
   worker.start();console.log(JSON.stringify({directory,projectId:project.id}));let last='';
-  while(project.turns.some(turn=>['working','queued'].includes(turn.status))){
+  while(project.turns.some(turn=>['working','queued'].includes(turn.status)) || project.turns.at(-1)?.status==='art_ready'){
+    if(project.turns.at(-1)?.status==='art_ready'){
+      console.log(JSON.stringify({event:'approve-validation-art',turn:project.turns.at(-1)!.id}));
+      project=await projects.build(project.id,owner.id,{requestId:id(),artTurnId:project.turns.at(-1)!.id});
+    }
     const state=JSON.stringify(project.turns.map(turn=>({status:turn.status,stage:turn.stage})));if(state!==last){console.log(state);last=state;}
     await new Promise(resolve=>setTimeout(resolve,2000));project=await projects.get(project.id,owner.id);
   }

@@ -17,12 +17,14 @@ export type MediaState = {
   icon?: Asset;
 };
 export type GenerationInput = {
+  phase: 'art' | 'build';
   jobId: string;
   projectId: string;
   ownerId: string;
   leaseTag?: string;
   gameId: string;
   prompt: string;
+  artFeedback?: string;
   parent?: Version;
   media: MediaState;
   signal: AbortSignal;
@@ -33,7 +35,7 @@ export type GenerationInput = {
   onSnapshot?: BuildInput['onSnapshot'];
   onMessage?: BuildInput['onMessage'];
 };
-export type GenerationResult = {build: BuildResult; media: MediaState; usage: unknown[]};
+export type GenerationResult = {build?: BuildResult; media: MediaState; usage: unknown[]};
 
 /** One bounded turn. Scheduling, ownership and publication belong to Projects. */
 export class GenerationService {
@@ -99,7 +101,7 @@ export class GenerationService {
         if(assets.length){job.branches.art='reused';return;}
         job.branches.art='working';job.timings.artStart=Date.now();await work(()=>save());
         const client=new OpenAI({apiKey:process.env.OPENAI_API_KEY,timeout:180000,maxRetries:0,fetch:this.providerFetch}),imageModel=process.env.IMAGE_MODEL??'gpt-image-1.5';
-        const body={model:imageModel,prompt:`One original game sprite: ${brief.assetDescription}. For a ${brief.style} retro microgame titled ${brief.title}. Playful clear silhouette, bold outlines, limited warm color palette, readable at 48 pixels. Single isolated object centered with generous transparent margin. Transparent background; no floor, text, watermark, border or collage. Useful gameplay asset, not a screenshot.`,size:'1024x1024' as const,quality:'low' as const,background:'transparent' as const,output_format:'png' as const,n:1};budget.reserve(body,0,true);
+        const body={model:imageModel,prompt:`One original game sprite: ${brief.assetDescription}. For a ${brief.style} retro microgame titled ${brief.title}. ${input.artFeedback ? `Latest art direction: ${input.artFeedback}. ` : ''}Playful clear silhouette, bold outlines, limited warm color palette, readable at 48 pixels. Single isolated object centered with generous transparent margin. Transparent background; no floor, text, watermark, border or collage. Useful gameplay asset, not a screenshot.`,size:'1024x1024' as const,quality:'low' as const,background:'transparent' as const,output_format:'png' as const,n:1};budget.reserve(body,0,true);
         const result=await work(()=>client.images.generate(body,{signal:budget.signal}));
         const encoded=result.data?.[0]?.b64_json;if(!encoded)throw new Error('Image model returned no image');const bytes=await work(()=>normalizeSprite(encoded));
         const asset=await work(()=>this.store.putAsset(bytes,'png',input.projectId));assets=[{...asset,name:brief.assetName,width:256,height:256,provenance:{model:imageModel,kind:'image-model',jobId:job.id}}];
@@ -108,11 +110,15 @@ export class GenerationService {
       const iconTask=(async()=>{
         if(icon){job.branches.icon='reused';await work(()=>save());return;}
         job.branches.icon='working';job.timings.iconStart=Date.now();await work(()=>save());
-        const subject={title:brief.title,premise:brief.premise,rules:job.prompt,style:brief.style};
+        // Cover cues are bounded by iconPrompt, so put the latest feedback before
+        // the growing conversation rather than truncating the user's new request.
+        const subject={title:brief.title,premise:brief.premise,
+          rules:[input.artFeedback && `Latest art direction: ${input.artFeedback}`, `Character/object design: ${brief.assetDescription}`, job.prompt].filter(Boolean).join('\n'),style:brief.style};
         const result=await work(()=>generateCartridgeIcon(this.store,subject,{signal:budget.signal,reserve:(body,tokens,image)=>budget.reserve(body,tokens,image),jobId:job.id,projectId:input.projectId,fetch:this.providerFetch}));
         icon=result.icon;job.previewIcon=icon;job.models.icon=result.model;job.usage.push({branch:'icon',model:result.model,usage:result.usage});job.branches.icon='ready';job.timings.iconEnd=Date.now();await work(()=>save());
       })();
       const musicTask=(async()=>{
+        if (input.phase === 'art') return;
         if(music){job.branches.music='reused';await work(()=>save());return;}
         job.branches.music='working';job.timings.musicStart=Date.now();await work(()=>save());
         const provider=this.musicProvider??symbolicMusicAdapter(async(schema,prompt)=>{
@@ -138,6 +144,9 @@ export class GenerationService {
       const failures:Error[]=[];for(let i=0;i<branches.length;i++)if(branches[i].status==='rejected'){job.branches[(['art','music','icon'] as string[])[i]]='failed';failures.push((branches[i] as PromiseRejectedResult).reason);}
       if(failures.length)throw new Error(failures.map(f=>f.message).join('; '));
       await work(save);
+      // Art review is a durable terminal step. No music or coding resources are
+      // allocated until a separate owner-approved build turn is claimed.
+      if (input.phase === 'art') return {media: mediaState(), usage: job.usage};
       const result = await this.builder.build({
         jobId: input.jobId, projectId: input.projectId, ownerId: input.ownerId, leaseTag: input.leaseTag,
         prompt: input.prompt, brief, gameId, assets, music, icon,

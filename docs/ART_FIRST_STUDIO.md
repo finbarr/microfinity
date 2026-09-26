@@ -1,7 +1,7 @@
 # Art-first cartridge studio
 
-Implemented and validated locally on September 26, 2026. This change has not been
-deployed to production.
+Deployed to https://microfinity.lol on September 26, 2026 (Pacific time),
+as application release `0bfd3d3`.
 
 Creation now has a durable art-review checkpoint:
 
@@ -61,3 +61,35 @@ cartridge to exercise the creation/play/publication path. It is not evidence of
 new model-generated game quality or generation latency.
 
 Screenshot evidence: `artifacts/art-first-studio/desktop-review.png`.
+
+
+## Production release
+
+The committed archive was built and type-checked on the Linux server. The existing
+Blaxel image and model configuration were retained. Both app and worker processes
+were verified against the release directory and exact committed source hashes,
+with zero restarts. Health, built assets, a database write, room creation, and an
+authenticated WebSocket lobby passed smoke checks.
+
+Activation occurred with no queued/working creation turns or playing matches.
+A database/assets backup completed beforehand. All 35 existing versions, 268
+results, and 56 asset hashes were preserved; code rollback retains the database.
+
+The real production browser created **Moonbeam Scoops**, project
+`100c978b17c1c23ed159f2f7`. Its artwork reached `art_ready` in **25.77 seconds**:
+one brief request, one cover, and one gameplay sprite. At review there was no
+music, code branch, game revision, or sandbox lease. Reloading retained the artwork
+and approval button. The separate build was started only by clicking
+**Build this game**. Deployment evidence and the production review screenshot are
+saved under `artifacts/art-first-studio/deployment/`.
+
+After approval, the build reached `ready` in **286.45 seconds (4m 46s)**. It reused
+the exact approved brief, cover, and gameplay sprite, made one music request and
+zero further image requests, and streamed three gameplay snapshots into the studio.
+Independent validation passed for 1, 2, 3, and 4 players. The completed game rendered
+in the production browser, finished its 15-second round, and restarted successfully.
+The acceptance game remains private and unpublished. All sandbox leases were
+released, and the app and builder remained active with zero service restarts.
+
+Machine-readable acceptance proof is in `deployment/acceptance.json` within the
+artifact directory above; browser evidence is `deployment/production-ready.png`.

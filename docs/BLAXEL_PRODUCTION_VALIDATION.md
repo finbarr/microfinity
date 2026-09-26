@@ -4,6 +4,7 @@ Initial cutover verified September 24, 2026 (Pacific time), on application relea
 `77b54b8`. The subsequent release `26f84d3` adds
 [multiplayer defaults](MULTIPLAYER_GENERATION_VALIDATION.md) and the
 [music deadline fix](GENERATION_MUSIC_STALL.md) at https://microfinity.lol.
+Release `0bfd3d3` adds the [art-first cartridge studio](ART_FIRST_STUDIO.md).
 Blaxel is the only game-building backend; the web app
 and a separate trusted builder worker run on the existing server.
 

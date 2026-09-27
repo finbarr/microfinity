@@ -26,6 +26,6 @@ test('Jev receives source and timing but never unfiltered runtime fields',async(
  const source=await readFile('games/cup-shuffle.ts','utf8'),vm=await Sandbox.create(await compile(source),await bootstrap());
  try{vm.call('init',{seed:91,difficulty:1,players:[{id:'p0',name:'A',color:colors[0]}]});const view=vm.call('observe','p0'),meta=vm.call('meta').meta;
   const state=jevState(meta,{...view,seed:91,secret:999},emptyButtons(),[],{source,intervalMs:200,expectedLatencyMs:110,observationAgeMs:33});
-  assert.match(state.game.cartridgeSource!,/step\(s,inputs,ctx\)/);assert.ok(!state.game.cartridgeSource!.includes('draw(v,g)'));assert.deepEqual(state.visibleNow,view.game);assert.ok(!('seed' in state));assert.ok(!('secret' in state));assert.ok(!('secret' in state.visibleNow));assert.equal(state.clock?.decisionIntervalMs,200);assert.match(state.controllerContract!,/does NOT press/);
+  assert.match(state.game.cartridgeSource!,/step\(s,\s*inputs,\s*ctx\)/);assert.doesNotMatch(state.game.cartridgeSource!,/draw\(v,\s*g\)/);assert.deepEqual(state.visibleNow,view.game);assert.ok(!('seed' in state));assert.ok(!('secret' in state));assert.ok(!('secret' in state.visibleNow));assert.equal(state.clock?.decisionIntervalMs,200);assert.match(state.controllerContract!,/does NOT press/);
  }finally{vm.dispose();}
 });

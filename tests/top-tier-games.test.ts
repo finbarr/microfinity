@@ -54,38 +54,38 @@ test('Patchwork Pass awards visible button bonuses, blocks overlaps, and bounds 
   try{
     let status=vm.call('init',{seed:17,difficulty:1,players:players(2)});
     const button=vm.call('observe','p0').game.buttons[0] as number;
-    status=vm.call('step',{p0:tap('action')},.05,'input');
+    status=vm.call('step',{p0:tap('action')});
     let view=vm.call('observe','p0').game;
     assert.equal(view.phase,'place');
     const targetX=Math.min(4,button%6),targetY=Math.floor(button/6);
-    for(let i=0;i<targetX;i++)status=vm.call('step',{p0:tap('right')},.05,'input');
-    for(let i=0;i<targetY;i++)status=vm.call('step',{p0:tap('down')},.05,'input');
+    for(let i=0;i<targetX;i++)status=vm.call('step',{p0:tap('right')});
+    for(let i=0;i<targetY;i++)status=vm.call('step',{p0:tap('down')});
     view=vm.call('observe','p0').game;
     assert.equal(view.valid,true);
     assert.ok(view.previewBonus>=1);
     assert.equal(view.previewPoints,2+view.previewBonus*2);
     const earned=view.previewPoints;
     vm.call('draw',view);
-    status=vm.call('step',{p0:tap('action')},.05,'input');
+    status=vm.call('step',{p0:tap('action')});
     assert.equal(status.scores.p0,earned);
     assert.deepEqual(vm.call('observe','p0').game.used[0],[0]);
-    status=vm.call('step',{},10,'timeout');
-    status=vm.call('step',{p0:tap('action')},.05,'input');
+    while(vm.call('observe','p0').game.turn!==0)status=vm.call('step',{});
+    status=vm.call('step',{p0:tap('action')});
     view=vm.call('observe','p0').game;
     assert.equal(view.phase,'place');
     assert.notEqual(view.piece,0,'the same player cannot reuse a patch shape');
-    while(view.x>targetX){status=vm.call('step',{p0:tap('left')},.05,'input');view=vm.call('observe','p0').game;}
-    while(view.x<targetX){status=vm.call('step',{p0:tap('right')},.05,'input');view=vm.call('observe','p0').game;}
-    while(view.y>targetY){status=vm.call('step',{p0:tap('up')},.05,'input');view=vm.call('observe','p0').game;}
-    while(view.y<targetY){status=vm.call('step',{p0:tap('down')},.05,'input');view=vm.call('observe','p0').game;}
+    while(view.x>targetX){status=vm.call('step',{p0:tap('left')});view=vm.call('observe','p0').game;}
+    while(view.x<targetX){status=vm.call('step',{p0:tap('right')});view=vm.call('observe','p0').game;}
+    while(view.y>targetY){status=vm.call('step',{p0:tap('up')});view=vm.call('observe','p0').game;}
+    while(view.y<targetY){status=vm.call('step',{p0:tap('down')});view=vm.call('observe','p0').game;}
     assert.equal(view.valid,false,'an occupied cell visibly blocks the ghost');
-    status=vm.call('step',{p0:tap('action')},.05,'input');
+    status=vm.call('step',{p0:tap('action')});
     assert.equal(status.scores.p0,earned);
-    assert.equal(vm.call('observe','p0').game.turns,2,'invalid stitching does not spend the turn');
+    assert.equal(vm.call('observe','p0').game.turns,3,'invalid stitching does not spend the turn');
     for(const count of [2,4]){
       status=vm.call('init',{seed:17,difficulty:1,players:players(count)});
-      while(!status.done)status=vm.call('step',{},10,'timeout');
-      assert.ok(status.time<=30,'idle action rounds must end by the short cap');
+      while(!status.done)status=vm.call('step',{});
+      assert.ok(status.time<=count*10+.1,'each player receives both five-second turns');
       assert.ok(Object.values(status.outcomes).every(outcome=>outcome==='failure'));
     }
   }finally{vm.dispose();}

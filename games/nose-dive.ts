@@ -1,13 +1,18 @@
 import { defineGame, colors } from '@microfinity/sdk';
 const TAU=Math.PI*2;
 const gap=(a:number,b:number)=>Math.abs(((a-b+Math.PI)%TAU+TAU)%TAU-Math.PI);
+// Keep angular tolerance fixed: slowing the spin makes the late timing window wider.
+const spinSpeed = (time: number, difficulty: number) => {
+  const remaining = Math.max(0, 1 - time / 13.9);
+  return 1.1 + difficulty * .1 + (4.4 + difficulty * .2) * remaining * remaining;
+};
 export default defineGame({
-  meta:{id:'nose-dive',title:'Nose Dive',instruction:'SPACE when the white spark reaches your colored gate!',description:'A spinning nose and eager fingers. Lead the nostrils, time your launch, and land the most clean picks before it sneezes!',rules:'The nose rotates clockwise. Angle and each hand angle are radians in 0..2pi. The white spark shows where the nostrils will be after finger travel=0.24 seconds; press SPACE as it reaches your colored gate (tolerance=0.33 radians). A press launches one pair of fingers and the result is fixed from the visible angle and speed at launch, with up to 0.15 seconds of input-age compensation. Release between launches. A miss recoils for 0.55 seconds and briefly slows future nose movement, without changing shots already in flight. Each clean pick scores one. Most clean picks after 14 seconds wins; zero picks loses.',players:[2,4],clock:'realtime',participation:'simultaneous',world:'shared',duration:14,style:'cartoon',score:{unit:'clean picks',order:'higher'},controls:{directions:false,action:'Launch fingers'},tags:['timing','party','one-button'],modifiers:[]},
+  meta:{id:'nose-dive',title:'Nose Dive',instruction:'SPACE when the white spark reaches your colored gate!',description:'A nose that starts fast and winds down, with eager fingers chasing it. Lead the nostrils, time your launch, and land the most clean picks before it sneezes!',rules:'The nose rotates clockwise, starting fast and steadily slowing over 14 seconds. Angle and each hand angle are radians in 0..2pi. The white spark shows where the nostrils will be after finger travel=0.24 seconds; press SPACE as it reaches your colored gate (tolerance=0.33 radians). A press launches one pair of fingers and the result is fixed from the visible angle and speed at launch, with up to 0.15 seconds of input-age compensation. Release between launches. A miss recoils for 0.55 seconds and briefly slows future nose movement, without changing shots already in flight. Each clean pick scores one. Most clean picks after 14 seconds wins; zero picks loses.',players:[2,4],clock:'realtime',participation:'simultaneous',world:'shared',duration:14,style:'cartoon',score:{unit:'clean picks',order:'higher'},controls:{directions:false,action:'Launch fingers'},tags:['timing','party','one-button'],modifiers:[]},
   audio:{music:'main-loop',soundPack:'pixel-bits'},
-  init(ctx){return {angle:ctx.random()*TAU,speed:1.7+ctx.difficulty*.2,time:0,slowUntil:0,sneeze:0,travel:.24,tolerance:.33,hands:ctx.players.map((p,i)=>({id:p.id,angle:[TAU-2.55,.59,TAU-.59,2.55][i],launchAt:-10,recoilUntil:0,hitUntil:0,flying:false,good:false,misses:0,picks:0}))};},
+  init(ctx){return {angle:ctx.random()*TAU,speed:spinSpeed(0,ctx.difficulty),time:0,slowUntil:0,sneeze:0,travel:.24,tolerance:.33,hands:ctx.players.map((p,i)=>({id:p.id,angle:[TAU-2.55,.59,TAU-.59,2.55][i],launchAt:-10,recoilUntil:0,hitUntil:0,flying:false,good:false,misses:0,picks:0}))};},
   step(s,inputs,ctx){
     s.time=ctx.time;
-    s.speed=Math.max(.7,1.7+ctx.difficulty*.2-ctx.time*.05)*(ctx.time<s.slowUntil?.55:1);
+    s.speed=spinSpeed(ctx.time,ctx.difficulty)*(ctx.time<s.slowUntil?.55:1);
     s.angle=(s.angle+s.speed*ctx.dt)%TAU;
     for(const hand of s.hands){
       if(hand.flying&&ctx.time-hand.launchAt>=s.travel){

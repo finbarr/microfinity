@@ -66,7 +66,7 @@ export function scriptedDecision(meta:Metadata,view:any,held:Buttons,serial=0):D
   else if(meta.id==='nose-dive'){const h=v.hands.find((h:any)=>h.id===id),a=v.angle+v.speed*v.travel;const error=Math.abs(((a-h.angle+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI);b.action=!held.action&&!h.flying&&v.time>=h.recoilUntil&&error<v.tolerance*.8;}
   else if(meta.id==='crawl-for-gold'){const c=v.crawlers.find((c:any)=>c.id===id);b.action=c.stage==='pull'||c.stage==='reach'&&!held.action&&Math.abs(c.phase-v.target)<v.half*.85;}
   else if(meta.id==='conveyor-clash'){if(view.roles[id]==='collector'){const target=[...v.parcels].filter((p:any)=>!p.bad).sort((a:any,b:any)=>b.y-a.y)[0];if(target)aim(v.x,160+target.lane*160);}else{b.action=!held.action;b.right=serial%4===0;}}
-  else if(meta.id==='odd-snack-out'){const target=v.snacks.findIndex((s:any)=>s.sprinkles===2);if(v.cursor!==target){b.right=!held.right;}else b.action=!held.action;}
+  else if(meta.id==='odd-snack-out'){const target=v.snacks.findIndex((s:any)=>v.clue==='frown'?s.mood==='sad':v.clue==='sleepy'?s.sleepy:s.sprinkles===2);if(v.cursor!==target){b.right=!held.right;}else b.action=!held.action;}
   else {b.action=!held.action;b.right=serial%3===0;b.down=serial%11===0;}
   return {buttons:b,source:'scripted',latencyMs:0};
 }

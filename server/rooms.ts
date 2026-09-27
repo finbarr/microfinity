@@ -23,7 +23,7 @@ type Seat={id:string;name:string;color:string;guestId?:string;ws?:WebSocket;read
 export class Room {
   readonly id=id().slice(0,8);hostId:string;settings:Settings;versions:Version[];
   phase:'lobby'|'preparing'|'countdown'|'playing'|'round-result'|'match-result'='lobby';
-  seats:Seat[]=[];round=0;matchId='';challengeId='';startsAt=0;phaseUntil=0;creating=false;revision=0;
+  seats:Seat[]=[];round=0;matchId='';lastMatchId='';challengeId='';startsAt=0;phaseUntil=0;creating=false;revision=0;
   private runner?:RuntimeProcess;private status:any;private views:Record<string,any>={};private busy=false;
   private last=performance.now();private accumulator=0;private lastSnapshot=0;private actionDeadline=0;private mode:Mode='native';
   private rounds:any[]=[];private points:Record<string,number>={};private timer:ReturnType<typeof setInterval>;private error='';
@@ -48,7 +48,8 @@ export class Room {
     seat.name=z.string().trim().min(1).max(24).parse(name);this.broadcast();
   });}
   join(guest:{id:string;name:string},ws:WebSocket){return this.sequence(()=>{
-    if(this.closed||ws.readyState!==1)throw new Error('This party connection has closed');
+    if(this.closed){ws.close(4004,'Party no longer exists');throw new Error('This party has closed');}
+    if(ws.readyState!==1)throw new Error('This party connection has closed');
     let seat=this.seats.find(s=>s.guestId===guest.id);
     if(!seat){
       if(this.phase!=='lobby')throw new Error('This party has started. Join after the host returns to the lobby.');
@@ -58,6 +59,7 @@ export class Room {
       seat.guestId=guest.id;this.syncBotSettings();this.challengeId='';this.revision++;
     }
     seat.name=guest.name;seat.ready=false;
+    if(!this.hostId)this.hostId=guest.id;
     if(seat.ws&&seat.ws!==ws)seat.ws.close(4001,'Session resumed elsewhere');seat.ws=ws;this.handoff(seat,'human');
     this.lastActivity=serverNow();
     this.send(ws,{type:'joined',roomId:this.id,playerId:seat.id});this.broadcast();
@@ -75,12 +77,53 @@ export class Room {
     if(message.type==='clock-reply'){const sample=seat.clock.accept(message.id,message.clientTime,serverNow());if(sample)this.send(ws,sample);return;}
     if(message.type==='ping'){this.send(ws,{type:'pong',clientTime:message.clientTime,serverTime:serverNow()});return;}
     this.lastActivity=serverNow();
+    if(message.type==='leave'){
+      const nextHost=message.nextHostId===undefined?undefined:this.seats.find(s=>s.guestId===message.nextHostId&&s.ws&&s!==seat);
+      if(message.nextHostId!==undefined){
+        if(seat.guestId!==this.hostId)throw new Error('Only the host can pass hosting');
+        if(!nextHost)throw new Error('Choose a connected friend to host');
+      }
+      if(seat.guestId===this.hostId){
+        this.hostId=(nextHost??this.seats.find(s=>s!==seat&&s.ws))?.guestId??'';
+        this.creating=false;
+      }
+      seat.ws=undefined;seat.ready=true;this.handoff(seat,seat.botType);
+      // During a round keep its recorded participant and slot stable. In the
+      // lobby/results an explicit departure frees the place for a new friend.
+      if(this.phase==='lobby'||this.phase==='match-result'){
+        seat.guestId=undefined;
+        if(this.phase==='lobby'){
+          this.seats=this.seats.filter(s=>s!==seat);
+          this.seats.forEach((s,i)=>{s.id=`p${i}`;s.color=colors[i];s.epoch++;s.seq=0;s.held=emptyButtons();s.queued=[];});
+          this.syncBotSettings();this.challengeId='';
+        }
+        this.revision++;
+      }
+      this.send(ws,{type:'party-left'});ws.close(4000,'party-left');
+      if(!this.seats.some(s=>s.ws))this.emptySince=serverNow();
+      this.broadcast();return;
+    }
+    if(message.type==='disband'){
+      if(seat.guestId!==this.hostId)throw new Error('Only the host can disband the party');
+      if(this.phase!=='lobby'&&this.phase!=='match-result')throw new Error('Finish this match before disbanding the party');
+      this.closed=true;clearInterval(this.timer);this.runner?.dispose();this.runner=undefined;
+      for(const member of this.seats)if(member.ws){
+        this.send(member.ws,{type:'party-ended'});member.ws.close(4005,'party-disbanded');member.ws=undefined;
+      }
+      return;
+    }
     if(['add-bot','remove-bot','bot-controller','playlist','random','creating','edit-party'].includes(message.type)){
       if(seat.guestId!==this.hostId)throw new Error('Only the host can edit this party');
       if(message.type==='edit-party'){
         if(this.phase!=='match-result')throw new Error('Finish this match before changing the party');
+        this.lastMatchId=this.matchId;
         this.runner?.dispose();this.runner=undefined;this.phase='lobby';this.round=0;this.matchId='';this.rounds=[];this.points={};this.views={};this.status=null;this.error='';this.creating=false;
-        for(const s of this.seats){s.ready=!s.ws;s.held=emptyButtons();s.queued=[];s.epoch++;s.seq=0;}this.broadcast();return;
+        this.versions=[];this.selection=undefined;this.startsAt=0;this.phaseUntil=0;
+        // New lineups begin with the people still here; old AI and departed
+        // seats must not force extra players into the next set of games.
+        this.seats=this.seats.filter(s=>s.ws);
+        this.seats.forEach((s,i)=>{s.id=`p${i}`;s.color=colors[i];s.ready=false;s.loaded=false;s.held=emptyButtons();s.queued=[];s.epoch++;s.seq=0;});
+        this.setupChanged();return;
       }
       if(this.phase!=='lobby')throw new Error('Party setup can only change in the lobby');
       if(message.type==='creating'){this.creating=z.boolean().parse(message.active);this.broadcast();return;}
@@ -241,7 +284,7 @@ export class Room {
   }
   private send(ws:WebSocket,message:any){if(ws.readyState===1&&ws.bufferedAmount<1_000_000)ws.send(JSON.stringify(message));}
   private broadcastEvent(message:any){for(const s of this.seats)if(s.ws)this.send(s.ws,message);}
-  broadcast(){for(const seat of this.seats)if(seat.ws)this.send(seat.ws,{type:'state',roomId:this.id,hostId:this.hostId,phase:this.phase,creating:this.creating,revision:this.revision,participantCounts:participantCounts(this.versions.map(v=>v.manifest),this.settings.mode),playlist:this.versions.map(v=>({id:v.id,meta:v.manifest.meta,icon:v.manifest.icon?.url??null})),settings:((({seed,...publicSettings})=>publicSettings)(this.settings)),round:this.round,roundCount:this.versions.length,matchId:this.matchId,challengeId:this.challengeId,startsAt:this.startsAt,serverTime:serverNow(),phaseUntil:this.phaseUntil,error:this.error,manifest:this.versions[this.round]?.manifest??this.versions.at(-1)?.manifest,mode:this.mode,epoch:seat.epoch,playerId:seat.id,network:seat.clock.estimate(serverNow()),seats:this.seats.map(s=>({id:s.id,name:s.name,color:s.color,ready:s.ready,connected:!!s.ws,controller:s.controller,botType:s.botType,fallback:s.fallback,guestId:s.guestId,points:this.points[s.id]??0})),view:this.views[seat.id]??null,results:this.rounds.at(-1)?.records.map(({metrics,...rest}:any)=>rest)??[]});}
+  broadcast(){for(const seat of this.seats)if(seat.ws)this.send(seat.ws,{type:'state',roomId:this.id,hostId:this.hostId,phase:this.phase,creating:this.creating,revision:this.revision,participantCounts:participantCounts(this.versions.map(v=>v.manifest),this.settings.mode),playlist:this.versions.map(v=>({id:v.id,meta:v.manifest.meta,icon:v.manifest.icon?.url??null})),settings:((({seed,...publicSettings})=>publicSettings)(this.settings)),round:this.round,roundCount:this.versions.length,matchId:this.matchId,lastMatchId:this.lastMatchId,challengeId:this.challengeId,startsAt:this.startsAt,serverTime:serverNow(),phaseUntil:this.phaseUntil,error:this.error,manifest:this.versions[this.round]?.manifest??this.versions.at(-1)?.manifest,mode:this.mode,epoch:seat.epoch,playerId:seat.id,network:seat.clock.estimate(serverNow()),seats:this.seats.map(s=>({id:s.id,name:s.name,color:s.color,ready:s.ready,connected:!!s.ws,controller:s.controller,botType:s.botType,fallback:s.fallback,guestId:s.guestId,points:this.points[s.id]??0})),view:this.views[seat.id]??null,results:this.rounds.at(-1)?.records.map(({metrics,...rest}:any)=>rest)??[]});}
   isExpired(now=serverNow()){
     if(this.closed)return true;
     if(!this.seats.some(s=>s.ws))return now-this.emptySince>=120000;

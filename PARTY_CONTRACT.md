@@ -17,6 +17,28 @@ Integration update: the user has assigned removal of replay UI, APIs and recordi
 - Engine owns player slots and any AI seats. The lobby grows as guests join, up to four seats; it reserves the creator even if an invitee connects first. At start it fills any required legacy minimum with AI seats, preserving explicit older target counts. Slots are stable `p0`…`p3` throughout a match. Do not expose internal `native`, `race`, `obstruction`, `pressure`, or `party-v1` adapter choices in normal UI.
 - A full room rejects additional joins. Reconnecting the same guest resumes its seat and current round subject to existing epoch/input ownership checks. A disconnected human seat falls back to the engine controller until that guest resumes; it does not become a second human.
 
+## Party continuation and navigation (September 2026)
+
+- At match results, host-only `{type:"edit-party"}` returns the whole room to its
+  existing lobby. It clears the playlist for a fresh selection, resets scores and
+  timing, increments the setup revision, and keeps connected people. The prior
+  match remains saved; `lastMatchId` lets each guest finish optional ratings.
+- An empty lobby's **Pick games & start** sends the atomic random-start command
+  above. Manual selection still starts exactly the shared pinned playlist.
+- `{type:"leave", nextHostId?:guestId}` explicitly leaves the party. Only the
+  current host can name a connected successor. Handoff and departure are one
+  serialized operation. Lobby departures free their seats; active matches retain
+  stable slots and saved participant attribution. A transport disconnect remains
+  reconnectable and is distinct from explicitly leaving.
+- Host-only `{type:"disband"}` is allowed in the lobby or at match results. It
+  closes the room for all members and rejects future joins immediately with code
+  4004. Saved ratings, games and match results are retained.
+- Browser history represents arcade filters, parties, studio projects/remixes and
+  saved result dialogs. `popstate` restores the screen. Returning from the studio
+  retains the socket and roster; navigating away from a party disconnects without
+  replaying start, playlist, handoff or disband commands. Returning through history
+  always uses the server's current phase and host, never historical authority.
+
 ## Cartridge and generation contract
 
 - All new cartridges are playable for 1–4 human participants. Generation is prompt-driven: no author/user choice for min/max players or clock. The model selects realtime vs action clock from the prompt. **Worker01: omit `meta.players` and `meta.modifiers` in new `defineGame` sources** (SDK defaults are `[1,4]` and `[]`). For `participation:'individual'`, author a single attempt against `ctx.players[0]`; the engine runs a separate equal-seed attempt for every participant. For `simultaneous` or `rotating`, author the shared rules against the actual `ctx.players` array for any length 1–4. Keep `role` and bounded timeout behavior correct for that array. Explicit old metadata remains accepted when remixing old sources.

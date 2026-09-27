@@ -4,6 +4,8 @@ export type Connection = {
 };
 
 export function closedConnection(code: number, reason: string): Connection {
+  if (reason === 'party-left') return {status:'ended',message:'You left the party. Your results are saved.'};
+  if (reason === 'party-disbanded') return {status:'ended',message:'The host disbanded the party. Your results are saved.'};
   if (reason === 'server-shutdown') return {status:'ended',message:'The server restarted and this party has ended. Saved results remain available from the arcade.'};
   if (reason === 'room-expired' || code === 4004) return {status:'ended',message:'This party has closed. Return to the arcade to find your saved results or start another party.'};
   if (code === 4001) return {status:'replaced',message:'Your seat is open in another tab. Rejoin here to move it back to this tab.'};

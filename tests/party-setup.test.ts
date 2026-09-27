@@ -28,7 +28,7 @@ test('lobby bot ownership, queue revisions and generation phase preserve pinned 
     await room.message(a as any,{type:'start'});const original=room.challengeId;
     await assert.rejects(()=>room.message(a as any,{type:'add-bot'}),/only change in the lobby/);
     await room.message(a as any,{type:'asset-error'});assert.equal(room.phase,'match-result');
-    await room.message(a as any,{type:'edit-party'});assert.equal(room.phase,'lobby');assert.equal(room.matchId,'');assert.equal(room.challengeId,original);
+    await room.message(a as any,{type:'edit-party'});assert.equal(room.phase,'lobby');assert.equal(room.matchId,'');assert.equal(room.challengeId,'');assert.deepEqual(room.versions,[]);
     await room.message(a as any,{type:'playlist',revision:room.revision,versions:[toast.id]});assert.equal(room.challengeId,'');
     await room.disconnect(b as any);assert.equal(room.seats[1].controller,'scripted');
     await room.message(a as any,{type:'remove-bot',playerId:'p1'});assert.equal(room.seats.length,1);

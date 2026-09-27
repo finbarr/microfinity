@@ -1,5 +1,5 @@
 import {readSaved} from './storage';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Manifest } from '../server/store';
 import {CartridgeCard} from './CartridgeCard';
@@ -17,14 +17,24 @@ import {FeedbackEffects} from './feedback';
 import {ClientClock} from './network-clock';
 import {countdownValue} from '../shared/countdown';
 import {Lobby} from './Lobby';
+import {PartyActions} from './PartyActions';
+import {createNavigation, type ArcadeRoute} from './routing';
 import {closedConnection,resultMessage,type Connection} from './connection';
 import {defaultRandomFilters,type PartySettings} from '../shared/party';
 import './styles.css';
 type Guest={id:string;name:string;token:string};
+const navigation = createNavigation(window);
 const soloSettings:PartySettings={targetPlayers:1,botType:'jev',mode:'native',difficulty:1};
 function App(){
-  const [guest,setGuest]=useState<Guest|null>(null),[library,setLibrary]=useState<Manifest[]>([]),[tab,setTab]=useState('arcade'),[selected,setSelected]=useState<string[]>([]),[filter,setFilter]=useState('all'),[error,setError]=useState(''),[room,setRoom]=useState<any>(null),[name,setName]=useState(readSaved('name')??'Player'),[muted,setMuted]=useState(audio.settings.muted),[soundPanel,setSoundPanel]=useState(false),[clock,setClock]=useState(Date.now());
-  const [editorId,setEditorId]=useState<string|null>(null),[remix,setRemix]=useState(''),[matchSummary,setMatchSummary]=useState<any>(null),[recentMatches,setRecentMatches]=useState<any[]>([]);
+  const route = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot);
+  const routeRef = useRef(route); routeRef.current = route;
+  const navigate = navigation.navigate;
+  const tab = route.screen === 'studio' ? (route.roomId ? 'party-create' : 'create') : 'arcade';
+  const editorId = route.projectId ?? null, remix = route.remixId ?? '', filter = route.filter ?? 'all';
+  const [guest,setGuest]=useState<Guest|null>(null),[library,setLibrary]=useState<Manifest[]>([]),[selected,setSelected]=useState<string[]>([]),[error,setError]=useState(''),[room,setRoom]=useState<any>(null),[name,setName]=useState(readSaved('name')??'Player'),[muted,setMuted]=useState(audio.settings.muted),[soundPanel,setSoundPanel]=useState(false),[clock,setClock]=useState(Date.now());
+  const [matchSummary,setMatchSummary]=useState<any>(null),[recentMatches,setRecentMatches]=useState<any[]>([]);
+  const [partyPending,setPartyPending]=useState(false);
+  const connectedRoomId=useRef<string|null>(null);
   const [cabinetMenu,setCabinetMenu]=useState(false),[crt,setCrt]=useState(()=>readSaved('crt')!=='off'),[crtMotion,setCrtMotion]=useState(()=>readSaved('crtMotion')==='on');
   const [ratings,setRatings]=useState<Record<string,RatingSummary>>({});
   const [connection,setConnection]=useState<Connection>({status:'idle',message:''});
@@ -42,19 +52,22 @@ function App(){
   const loadLibrary=()=>Promise.all([api('/library'),api('/ratings')]).then(([entries,ratings])=>{setLibrary(entries);setRatings(ratings);}).catch(e=>setError(e.message));
   useEffect(()=>{
     let saved:Guest|null=null;try{saved=JSON.parse(readSaved('guest')??'null');}catch{}
-    void api('/guest',{token:saved?.token,name}).then(g=>{setGuest(g);setName(g.name);guestRef.current=g;localStorage.setItem('microfinity.guest',JSON.stringify(g));void loadLibrary();const params=new URLSearchParams(location.search);if(params.get('room'))connect(params.get('room')!,g);if(params.get('create')){setTab(params.get('room')?'party-create':'create');setEditorId(params.get('create'));}else if(params.get('studio'))setTab('create');else if(!params.get('room')&&params.get('challenge'))void api(`/challenges/${params.get('challenge')}/play`,{}).then(r=>connect(r.id,g)).catch(e=>setError(e.message));}).catch(e=>setError(e.message));
+    void api('/guest',{token:saved?.token,name}).then(g=>{setGuest(g);setName(g.name);guestRef.current=g;localStorage.setItem('microfinity.guest',JSON.stringify(g));void loadLibrary();}).catch(e=>setError(e.message));
     const visibility=()=>{setPageVisible(!document.hidden);audio.setActive(!document.hidden);feedback.current.clear();setClock(networkClock.current.now());};visibility();document.addEventListener('visibilitychange',visibility);
     const timer=setInterval(()=>setClock(networkClock.current.now()),100);return()=>{document.removeEventListener('visibilitychange',visibility);clearInterval(timer);socket.current?.close();audio.stop();};
   },[]);
   const send=(data:unknown)=>{if(socket.current?.readyState===1)socket.current.send(JSON.stringify(data));};
   function connect(roomId:string,g=guestRef.current){
-    playlistEdit.current=null;setPlaylistPending(false);setPendingAddition(null);
-    if(!g)return;socket.current?.close();setConnection({status:'connecting',message:'Joining your party…'});setError('');seq.current=0;const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/socket`);socket.current=ws;const savedJob=new URLSearchParams(location.search).get('create');history.replaceState({},'',`?room=${roomId}${savedJob?`&create=${savedJob}`:''}`);
+    playlistEdit.current=null;setPlaylistPending(false);setPendingAddition(null);setPartyPending(false);
+    if(!g)return;socket.current?.close();connectedRoomId.current=roomId;setConnection({status:'connecting',message:'Joining your party…'});setError('');seq.current=0;const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/socket`);socket.current=ws;
     ws.onopen=()=>{if(socket.current===ws)ws.send(JSON.stringify({type:'join',roomId,token:g.token}));else ws.close();};
     ws.onmessage=e=>{
       if(socket.current!==ws)return;const m=JSON.parse(e.data);
       if(m.type==='clock-probe'){ws.send(JSON.stringify({type:'clock-reply',id:m.id,clientTime:performance.now()}));return;}
       if(m.type==='clock'){networkClock.current.update(m);setClock(networkClock.current.now());return;}
+      if(m.type==='party-left'||m.type==='party-ended'){
+        navigate({});setError(m.type==='party-ended'?'The host disbanded the party. Your results are saved.':'');return;
+      }
       if(m.type==='state'){
         networkClock.current.observeState(m);setClock(networkClock.current.now());
         if(roomRef.current?.epoch!==m.epoch)seq.current=0;
@@ -62,15 +75,17 @@ function App(){
         if(playlistEdit.current&&(m.roomId!==playlistEdit.current.roomId||m.revision>playlistEdit.current.revision||m.phase!=='lobby'||m.hostId!==guestRef.current?.id)){playlistEdit.current=null;setPlaylistPending(false);}
         if(quickStart.current===m.roomId){if(m.phase==='lobby'&&m.hostId===guestRef.current?.id){quickStart.current=null;ws.send(JSON.stringify({type:'start'}));}else if(m.phase!=='lobby')quickStart.current=null;}
         if(m.phase!=='lobby'){setLaunching(false);launchBusy.current=false;}
+        if(roomRef.current?.phase!==m.phase||roomRef.current?.hostId!==m.hostId)setPartyPending(false);
+        if(routeRef.current.screen==='studio'&&(m.phase!=='lobby'||m.hostId!==guestRef.current?.id))navigate({roomId:m.roomId},true);
         setRoom(m);roomRef.current=m;setConnection(previous=>previous.status==='connected'?previous:{status:'connected',message:''});
       }
-      if(m.type==='error'){quickStart.current=null;setLaunching(false);launchBusy.current=false;playlistEdit.current=null;setPlaylistPending(false);setError(m.message);setPendingAddition(null);}
+      if(m.type==='error'){setPartyPending(false);quickStart.current=null;setLaunching(false);launchBusy.current=false;playlistEdit.current=null;setPlaylistPending(false);setError(m.message);setPendingAddition(null);}
       if(m.type==='feedback'&&m.matchId===roomRef.current?.matchId&&m.round===roomRef.current?.round){
         feedback.current.add(m.events,performance.now(),!document.hidden);
         for(const event of m.events)audio.effect(`${m.matchId}:${m.round}:${event.id}`,event.kind,event.sound);
       }
     };
-    ws.onclose=e=>{if(socket.current!==ws)return;quickStart.current=null;setLaunching(false);launchBusy.current=false;playlistEdit.current=null;setPlaylistPending(false);setConnection(closedConnection(e.code,e.reason));if(e.code===1001||e.code===4004)setError('');setPendingAddition(null);audio.stop();feedback.current.clear();};
+    ws.onclose=e=>{if(socket.current!==ws)return;setPartyPending(false);quickStart.current=null;setLaunching(false);launchBusy.current=false;playlistEdit.current=null;setPlaylistPending(false);setConnection(closedConnection(e.code,e.reason));if(e.code===1001||e.code===4004)setError('');setPendingAddition(null);audio.stop();feedback.current.clear();};
     ws.onerror=()=>{if(socket.current===ws)setConnection({status:'lost',message:'Could not connect to the party. Reconnect to try again.'});};
   }
   const countdown=room?.phase==='countdown'?countdownValue(room.startsAt,clock):null;
@@ -84,10 +99,11 @@ function App(){
     if(countdown!==null)audio.effect(`${room.matchId}:${room.round}:countdown:${countdown}`,'countdown');
   },[room?.phase,room?.round,room?.manifest?.id,clock,countdown,connection.status,editorId,tab,launching]);
   async function launch(request:Record<string,unknown>,immediate:boolean){
-    if(launchBusy.current)return;launchBusy.current=true;const serial=++launchSerial.current;
+    if(launchBusy.current)return;launchBusy.current=true;const serial=++launchSerial.current,origin=routeRef.current;
     try{setError('');if(immediate)setLaunching(true);await audio.unlock().catch(()=>{});
       const response=await api('/rooms',request);if(serial!==launchSerial.current)return;
-      quickStart.current=immediate?response.id:null;connect(response.id);
+      if(routeRef.current!==origin){launchBusy.current=false;setLaunching(false);return;}
+      quickStart.current=immediate?response.id:null;navigate({roomId:response.id});
       if(!immediate)launchBusy.current=false;
     }catch(e){if(serial!==launchSerial.current)return;quickStart.current=null;launchBusy.current=false;setLaunching(false);setError((e as Error).message);}
   }
@@ -101,50 +117,107 @@ function App(){
     if(selected.some(id=>library.find(game=>game.id===id)?.provenance.draft===true)){setError('Wait for your selected games to finish before adding them to a party.');return;}
     await launch({lobby:true,versions:selected},false);
   }
-  function leave(){launchSerial.current++;launchBusy.current=false;quickStart.current=null;playlistEdit.current=null;setPlaylistPending(false);setLaunching(false);setCabinetMenu(false);setPendingAddition(null);setInviteCopied(false);socket.current?.close(1000);socket.current=null;setConnection({status:'idle',message:''});setRoom(null);roomRef.current=null;setTab('arcade');audio.stop();feedback.current.clear();history.replaceState({},'','/');setError('');}
+  function detachRoom(){
+    launchSerial.current++;launchBusy.current=false;quickStart.current=null;
+    playlistEdit.current=null;setPlaylistPending(false);setPartyPending(false);setLaunching(false);
+    setCabinetMenu(false);setPendingAddition(null);setInviteCopied(false);
+    const previous=socket.current;socket.current=null;connectedRoomId.current=null;
+    previous?.close(1000);setConnection({status:'idle',message:''});setRoom(null);roomRef.current=null;
+    audio.stop();feedback.current.clear();
+  }
+  function leave(nextHostId?:string){
+    if(partyPending)return;
+    if(socket.current?.readyState===1&&roomRef.current){
+      setPartyPending(true);send({type:'leave',...(nextHostId?{nextHostId}:{})});
+    }else {detachRoom();navigate({});}
+  }
+  function goHome(){
+    setCabinetMenu(false);
+    // Studio visits return to the shared lobby. During a match, ordinary
+    // navigation can leave the screen; only the host's action moves everyone.
+    navigate(roomRef.current?.phase==='lobby'?{roomId:roomRef.current.roomId}:{});
+  }
+  function partyCommand(type:'disband'|'edit-party'){
+    if(partyPending||connection.status!=='connected')return;
+    setPartyPending(true);send({type});
+  }
+  useEffect(()=>{
+    if(!guest)return;
+    if(connectedRoomId.current!==route.roomId){
+      if(connectedRoomId.current)detachRoom();
+      if(route.roomId)connect(route.roomId);
+    }
+    },[guest?.id,route.roomId]);
+  useEffect(()=>{setCabinetMenu(false);setSoundPanel(false);},[route]);
+  useEffect(()=>{
+    if(!guest||!route.challengeId||route.roomId)return;
+    let cancelled=false;
+    void api(`/challenges/${route.challengeId}/play`,{}).then(result=>{
+      if(!cancelled)navigate({roomId:result.id},true);
+    }).catch(e=>{if(!cancelled)setError(e.message);});
+    return()=>{cancelled=true;};
+  },[guest?.id,route.challengeId,route.roomId]);
   function updatePartyPlaylist(versions:string[]){const current=roomRef.current;if(!current||current.phase!=='lobby'||current.hostId!==guestRef.current?.id||socket.current?.readyState!==1||playlistEdit.current)return false;if(versions.length>12){setError('Pick up to twelve games for one party.');return false;}playlistEdit.current={roomId:current.roomId,revision:current.revision};setPlaylistPending(true);send({type:'playlist',revision:current.revision,versions});return true;}
-  async function startParty(){if(!await saveName()||playlistEdit.current)return;const current=roomRef.current;if(current?.phase!=='lobby'||current.hostId!==guestRef.current?.id||!current.playlist.length)return;void audio.unlock().catch(()=>{});send({type:'start'});}
-  function showMatchSummary(matchId:string){void api(`/matches/${matchId}`).then(setMatchSummary).catch(e=>setError(e.message));}
-  useEffect(()=>{if(guest?.id&&!room)void api('/matches').then(setRecentMatches).catch(e=>setError(e.message));},[guest?.id,room?.roomId]);
-  function openEditor(projectId:string|null){setEditorId(projectId);if(!projectId)setRemix('');history.replaceState({},'',`${room?`?room=${room.roomId}&`:'?'}${projectId?`create=${projectId}`:'studio=1'}`);}
-  function beginRemix(g:Manifest){if(room?.phase==='lobby')createInParty();else{leave();setTab('create');}setEditorId(null);setRemix(g.id);}
-  function returnToParty(){send({type:'creating',active:false});setPendingAddition(null);setTab('arcade');if(room)history.replaceState({},'',`?room=${room.roomId}`);}
-  function createInParty(){setTab('party-create');send({type:'creating',active:true});setEditorId(null);setRemix('');setPendingAddition(null);}
+  async function startParty(){
+    if(!await saveName()||playlistEdit.current||partyPending)return;
+    const current=roomRef.current;
+    if(current?.phase!=='lobby'||current.hostId!==guestRef.current?.id)return;
+    void audio.unlock().catch(()=>{});setPartyPending(true);
+    send(current.playlist.length?{type:'start'}:{type:'start',revision:current.revision,random:{count:4}});
+  }
+  function showMatchSummary(matchId:string){navigate({...route,matchId});}
+  function closeMatchSummary(){navigation.dismiss({...route,matchId:undefined});}
+  useEffect(()=>{
+    setMatchSummary(null);
+    if(!guest||!route.matchId)return;
+    let cancelled=false;
+    void api(`/matches/${route.matchId}`).then(match=>{if(!cancelled)setMatchSummary(match);}).catch(e=>{if(!cancelled)setError(e.message);});
+    return()=>{cancelled=true;};
+  },[guest?.id,route.matchId]);
+  useEffect(()=>{if(guest?.id&&(!room||room.phase==='lobby'))void api('/matches').then(setRecentMatches).catch(e=>setError(e.message));},[guest?.id,room?.roomId,room?.phase]);
+  function openEditor(projectId:string|null){navigate({roomId:route.roomId,screen:'studio',projectId:projectId??undefined});}
+  function beginRemix(g:Manifest){navigate({roomId:route.roomId,screen:'studio',remixId:g.id});}
+  function returnToParty(){setPendingAddition(null);navigate({roomId:route.roomId});}
+  function createInParty(){openEditor(null);}
   function addCreationToParty(version:string){if(!room)return;if(updatePartyPlaylist([...room.playlist.map((g:any)=>g.id),version]))setPendingAddition({version,revision:room.revision,length:room.playlist.length+1});}
   useEffect(()=>{if(pendingAddition&&room?.revision>pendingAddition.revision&&room.playlist.length===pendingAddition.length&&room.playlist.at(-1)?.id===pendingAddition.version)returnToParty();},[room?.revision,pendingAddition]);
-  useEffect(()=>{if(tab==='party-create'&&room&&(room.phase!=='lobby'||room.hostId!==guest?.id)){setTab('arcade');setPendingAddition(null);}},[tab,room?.phase,room?.hostId,guest?.id]);
-  useEffect(()=>{if(tab==='party-create'&&room?.phase==='lobby'&&room.hostId===guest?.id)send({type:'creating',active:true});},[tab,room?.roomId,room?.phase,room?.hostId,guest?.id]);
+  useEffect(()=>{
+    if(room?.phase!=='lobby'||room.hostId!==guest?.id||connection.status!=='connected')return;
+    send({type:'creating',active:tab==='party-create'});
+  },[tab,room?.roomId,room?.phase,room?.hostId,guest?.id,connection.status]);
+  useEffect(()=>{if(tab==='party-create'&&room&&(room.phase!=='lobby'||room.hostId!==guest?.id))navigate({roomId:room.roomId},true);},[tab,room?.phase,room?.hostId,guest?.id]);
   const inLobby=room?.phase==='lobby';
   const picked:string[]=inLobby?room.playlist.map((game:any)=>game.id):selected;
   function toggle(version:string){const current=roomRef.current,ids:string[]=current?.phase==='lobby'?current.playlist.map((game:any)=>game.id):selected;const next=ids.includes(version)?ids.filter(id=>id!==version):[...ids,version];if(next.length>12){setError('Pick up to twelve games for one party.');return;}if(current?.phase==='lobby')updatePartyPlaylist(next);else setSelected(next);}
   const connected=connection.status==='connected',isHost=room?.hostId===guest?.id,playing=connected&&room?.phase==='playing'&&!matchSummary&&!cabinetMenu&&!soundPanel,meta=room?.manifest?.meta;
   const copyInvite=()=>{if(!room)return;void navigator.clipboard.writeText(`${location.origin}/?room=${room.roomId}`).then(()=>{setInviteCopied(true);setTimeout(()=>setInviteCopied(false),2500);}).catch(()=>setError('Could not copy the invite link. You can select the link shown in the room.'));};
   const editing=useArcadeNavigation({screen:`${guest?"ready":"loading"}:${tab}:${launching?'launch':''}:${room?.roomId??''}:${room?.phase??''}:${editorId??'idea'}:${matchSummary?'summary':soundPanel?'sound':cabinetMenu?'menu':''}`,gameplay:playing,onBack:()=>{
-    if(matchSummary)setMatchSummary(null);else if(soundPanel)setSoundPanel(false);else if(cabinetMenu)setCabinetMenu(false);else setCabinetMenu(true);
+    if(matchSummary)closeMatchSummary();else if(soundPanel)setSoundPanel(false);else if(cabinetMenu)setCabinetMenu(false);else setCabinetMenu(true);
   }});
   return <div className={`app arcade ${crt?'crt-enabled':''} ${crt&&crtMotion?'crt-motion':''}`}>
-    <header className="site-header" data-arrow-ignore><a href="/" className="brand" onClick={e=>{e.preventDefault();leave();}}><span className="brand-mark">m<span>✦</span></span>microfinity<span className="brand-period">.</span></a><div className="header-right"><label className="header-name"><span>Your name</span><input aria-label="Your name" autoComplete="nickname" maxLength={24} value={name} onChange={e=>setName(e.target.value)} onBlur={()=>{void saveName();}}/></label><button className="sound-settings" aria-label="Options" onClick={()=>setCabinetMenu(true)}>☷ <span>OPTIONS</span> <kbd>ESC</kbd></button></div></header>
+    <header className="site-header" data-arrow-ignore><a href="/" className="brand" onClick={e=>{e.preventDefault();goHome();}}><span className="brand-mark">m<span>✦</span></span>microfinity<span className="brand-period">.</span></a><div className="header-right"><label className="header-name"><span>Your name</span><input aria-label="Your name" autoComplete="nickname" maxLength={24} value={name} onChange={e=>setName(e.target.value)} onBlur={()=>{void saveName();}}/></label><button className="sound-settings" aria-label="Options" onClick={()=>setCabinetMenu(true)}>☷ <span>OPTIONS</span> <kbd>ESC</kbd></button></div></header>
     {soundPanel&&<div className="modal-backdrop"><section className="sound-panel" role="dialog" aria-modal="true" aria-label="Cabinet settings"><button className="close" aria-label="Close cabinet settings" onClick={()=>setSoundPanel(false)}>×</button><div className="eyebrow">CABINET SETUP</div><h2>Sound + picture</h2><button data-nav-start onClick={()=>{audio.set({muted:!muted});setMuted(!muted);void audio.unlock().catch(()=>{});}}>{muted?'Unmute all sound':'Mute all sound'}</button><label>Music<input aria-label="Music volume" type="range" min="0" max="1" step=".05" defaultValue={audio.settings.music} onChange={e=>audio.set({music:Number(e.target.value)})}/></label><label>Effects<input aria-label="Effects volume" type="range" min="0" max="1" step=".05" defaultValue={audio.settings.effects} onChange={e=>audio.set({effects:Number(e.target.value)})}/></label><label className="checkbox-label"><input type="checkbox" checked={crt} onChange={e=>{setCrt(e.target.checked);localStorage.setItem('microfinity.crt',e.target.checked?'on':'off');}}/>CRT scanlines + glow</label><label className="checkbox-label"><input type="checkbox" disabled={!crt} checked={crtMotion} onChange={e=>{setCrtMotion(e.target.checked);localStorage.setItem('microfinity.crtMotion',e.target.checked?'on':'off');}}/>Occasional CRT wobble</label><p>Wobble stays off when your device requests reduced motion.</p><button onClick={()=>void audio.unlock().catch(()=>setError('Your browser is blocking sound. Try Enable sound again.'))}>Enable sound</button></section></div>}
-    {cabinetMenu&&!soundPanel&&<div className="modal-backdrop"><section className="cabinet-menu" role="dialog" aria-modal="true" aria-label="Options"><div className="eyebrow">CABINET MENU</div><h2>Options</h2>{room&&['preparing','countdown','playing','round-result'].includes(room.phase)&&<p>Online rounds keep running while this menu is open.</p>}<button className="primary" data-nav-start onClick={()=>setCabinetMenu(false)}>{room?.phase==='playing'?'Resume game':'Back'}</button><button onClick={()=>setSoundPanel(true)}>Sound + picture</button>{tab==='party-create'?<button onClick={()=>{setCabinetMenu(false);returnToParty();}}>Back to party</button>:(room||launching||tab!=='arcade')?<button onClick={leave}>Back to arcade</button>:<button onClick={()=>{setCabinetMenu(false);setTab('create');}}>Make a game</button>}</section></div>}
-    {connection.message&&<div className="notice connection-notice" role="status"><span>{connection.message}</span>{['lost','replaced'].includes(connection.status)&&<button onClick={()=>{const roomId=room?.roomId??new URLSearchParams(location.search).get('room');if(roomId)connect(roomId);else leave();}}>{connection.status==='replaced'?'Rejoin here':'Reconnect'}</button>}{connection.status!=='connecting'&&<button onClick={leave}>Return to arcade</button>}</div>}
+    {cabinetMenu&&!soundPanel&&<div className="modal-backdrop"><section className="cabinet-menu" role="dialog" aria-modal="true" aria-label="Options"><div className="eyebrow">CABINET MENU</div><h2>Options</h2>{room&&['preparing','countdown','playing','round-result'].includes(room.phase)&&<p>Online rounds keep running while this menu is open.</p>}<button className="primary" data-nav-start onClick={()=>setCabinetMenu(false)}>{room?.phase==='playing'?'Resume game':'Back'}</button><button onClick={()=>setSoundPanel(true)}>Sound + picture</button>{tab==='party-create'?<button onClick={()=>{setCabinetMenu(false);returnToParty();}}>Back to party</button>:(room||launching||tab!=='arcade')?<button onClick={()=>room?leave():goHome()}>{room?'Leave party':'Back to arcade'}</button>:<button onClick={()=>{setCabinetMenu(false);openEditor(null);}}>Make a game</button>}</section></div>}
+    {connection.message&&<div className="notice connection-notice" role="status"><span>{connection.message}</span>{['lost','replaced'].includes(connection.status)&&<button onClick={()=>{const roomId=room?.roomId??new URLSearchParams(location.search).get('room');if(roomId)connect(roomId);else navigate({});}}>{connection.status==='replaced'?'Rejoin here':'Reconnect'}</button>}{connection.status!=='connecting'&&<button onClick={()=>leave()}>Return to arcade</button>}</div>}
     {error&&<div className="notice" role="status">{error}<button aria-label="Dismiss message" onClick={()=>setError('')}>×</button></div>}
-    {launching&&<main className="launch-screen" aria-live="polite"><span className="eyebrow">LOADING CARTRIDGE</span><h1>GET READY</h1><button className="text-button" data-nav-start onClick={leave}>Back to arcade</button></main>}
+    {launching&&<main className="launch-screen" aria-live="polite"><span className="eyebrow">LOADING CARTRIDGE</span><h1>GET READY</h1><button className="text-button" data-nav-start onClick={()=>leave()}>Back to arcade</button></main>}
     {!launching&&(!room||inLobby)&&tab==='arcade'&&<main>
-      <section className="arcade-title"><div><div className="eyebrow">MICROFINITY AMUSEMENTS · FREE PLAY</div><h1>SELECT A GAME<span className="title-cursor" aria-hidden="true">_</span></h1><p>Tiny games. Big rivalries. One more round.</p></div><div className="arcade-start"><button className="primary" data-nav-start disabled={!guest||launching||(inLobby&&(!connected||!isHost||playlistPending||!picked.length||room.creating))} onClick={()=>void (inLobby?startParty():createRoom())}>{inLobby?(isHost?'▶ START PARTY':'WAITING FOR HOST'):selected.length?`▶ PLAY ${selected.length} SELECTED`:'▶ QUICK PLAY'}</button><button className="secondary" disabled={!guest||launching} onClick={()=>inLobby?leave():void createParty()}>{inLobby?'LEAVE PARTY':'＋ CREATE PARTY'}</button></div></section>
+      <section className="arcade-title"><div><div className="eyebrow">MICROFINITY AMUSEMENTS · FREE PLAY</div><h1>SELECT A GAME<span className="title-cursor" aria-hidden="true">_</span></h1><p>Tiny games. Big rivalries. One more round.</p></div><div className="arcade-start"><button className="primary" data-nav-start disabled={!guest||launching||(!!route.roomId&&!room)||(inLobby&&(!connected||!isHost||playlistPending||partyPending||room.creating))} onClick={()=>void (inLobby?startParty():createRoom())}>{inLobby?(isHost?(partyPending?'STARTING…':picked.length?'▶ START PARTY':'▶ PICK GAMES & START'):'WAITING FOR HOST'):selected.length?`▶ PLAY ${selected.length} SELECTED`:'▶ QUICK PLAY'}</button>{inLobby?<PartyActions room={room} isHost={isHost} disabled={!connected||partyPending} onLeave={leave} onDisband={()=>partyCommand('disband')}/>:<button className="secondary" disabled={!guest||launching||!!route.roomId} onClick={()=>void createParty()}>＋ CREATE PARTY</button>}</div></section>
       {inLobby&&<Lobby room={room} isHost={isHost} onCopyInvite={copyInvite} inviteLink={`${location.origin}/?room=${room.roomId}`} inviteCopied={inviteCopied}/>}
-      {picked.length>0&&<section className="arcade-selection" aria-live="polite"><strong>{picked.length} picked for {inLobby?'the party':'Play'}</strong><div className="selected-games">{picked.map((id,index)=><button key={`${index}:${id}`} disabled={inLobby&&(!connected||!isHost||playlistPending)} aria-label={`Remove ${library.find(game=>game.id===id)?.meta.title??room?.playlist.find((game:any)=>game.id===id)?.meta.title??'game'} from selection`} onClick={()=>toggle(id)}>{library.find(game=>game.id===id)?.meta.title??room?.playlist.find((game:any)=>game.id===id)?.meta.title??'Saved game'} {(!inLobby||isHost)&&<span aria-hidden="true">×</span>}</button>)}</div></section>}
-      <section className="library-section"><div className="section-heading"><div className="eyebrow">INSERT IMAGINATION</div><div className="library-heading-top"><h2>CARTRIDGES<span> {library.length.toString().padStart(2,'0')}</span></h2><button className="library-create secondary" disabled={inLobby&&(!connected||!isHost||playlistPending)} onClick={()=>inLobby?createInParty():setTab('create')}>✦ MAKE A GAME</button></div><div className="filters">{['all','top','realtime','action'].map(f=><button key={f} className={filter===f?'selected':''} onClick={()=>setFilter(f)}>{f==='all'?'All games':f==='top'?'Top rated':f==='realtime'?'Quick reflexes':'Take your turn'}</button>)}</div></div>
-        {filter==='top'&&<p className="rank-note">Ranked by stars, balanced by the number of ratings.</p>}<div className="game-grid">{library.filter(g=>filter==='all'||filter==='top'||g.meta.clock===filter).sort((a,b)=>filter==='top'?compareRatings(ratings[a.gameId],ratings[b.gameId])||a.meta.title.localeCompare(b.meta.title):0).map((g,i)=><CartridgeCard key={g.id} game={g} index={i} selected={picked.includes(g.id)} inParty={inLobby} rating={ratings[g.gameId]} art={<GameArt kind={g.meta.id}/>} onToggle={()=>toggle(g.id)} onPlay={()=>inLobby?toggle(g.id):void createRoom([g.id])} onRemix={()=>beginRemix(g)} disabled={!guest||launching||(inLobby&&(!connected||!isHost||playlistPending||g.provenance.draft===true))}/>)}</div>
+      {inLobby&&room.lastMatchId&&<details className="previous-ratings"><summary>Rate the games you just played · optional</summary><MatchRatings key={room.lastMatchId} matchId={room.lastMatchId} api={api} onRated={(id,summary)=>setRatings(current=>({...current,[id]:summary}))}/></details>}
+      {picked.length>0&&<section className="arcade-selection" aria-live="polite"><strong>{picked.length} picked for {inLobby?'the party':'Play'}</strong>{(!inLobby||isHost)&&<button className="text-button" disabled={inLobby&&(!connected||playlistPending||partyPending)} onClick={()=>inLobby?updatePartyPlaylist([]):setSelected([])}>Clear selection</button>}<div className="selected-games">{picked.map((id,index)=><button key={`${index}:${id}`} disabled={inLobby&&(!connected||!isHost||playlistPending)} aria-label={`Remove ${library.find(game=>game.id===id)?.meta.title??room?.playlist.find((game:any)=>game.id===id)?.meta.title??'game'} from selection`} onClick={()=>toggle(id)}>{library.find(game=>game.id===id)?.meta.title??room?.playlist.find((game:any)=>game.id===id)?.meta.title??'Saved game'} {(!inLobby||isHost)&&<span aria-hidden="true">×</span>}</button>)}</div></section>}
+      <section className="library-section"><div className="section-heading"><div className="eyebrow">INSERT IMAGINATION</div><div className="library-heading-top"><h2>CARTRIDGES<span> {library.length.toString().padStart(2,'0')}</span></h2><button className="library-create secondary" disabled={(!!route.roomId&&!room)||(inLobby&&(!connected||!isHost||playlistPending))} onClick={()=>inLobby?createInParty():openEditor(null)}>✦ MAKE A GAME</button></div><div className="filters">{['all','top','realtime','action'].map(f=><button key={f} className={filter===f?'selected':''} onClick={()=>navigate({...route,filter:f==='all'?undefined:f as ArcadeRoute['filter']})}>{f==='all'?'All games':f==='top'?'Top rated':f==='realtime'?'Quick reflexes':'Take your turn'}</button>)}</div></div>
+        {filter==='top'&&<p className="rank-note">Ranked by stars, balanced by the number of ratings.</p>}<div className="game-grid">{library.filter(g=>filter==='all'||filter==='top'||g.meta.clock===filter).sort((a,b)=>filter==='top'?compareRatings(ratings[a.gameId],ratings[b.gameId])||a.meta.title.localeCompare(b.meta.title):0).map((g,i)=><CartridgeCard key={g.id} game={g} index={i} selected={picked.includes(g.id)} inParty={inLobby} rating={ratings[g.gameId]} art={<GameArt kind={g.meta.id}/>} onToggle={()=>toggle(g.id)} onPlay={()=>inLobby?toggle(g.id):void createRoom([g.id])} onRemix={()=>beginRemix(g)} disabled={!guest||launching||(!!route.roomId&&!room)||(inLobby&&(!connected||!isHost||playlistPending||g.provenance.draft===true))}/>)}</div>
       </section>
       {!!recentMatches.length&&<section className="recent-parties"><h2>Your recent parties</h2><div>{recentMatches.map(m=><button key={m.id} onClick={()=>showMatchSummary(m.id)}><strong>{new Date(m.created_at).toLocaleDateString(undefined,{month:'short',day:'numeric'})} · {m.rounds} round{m.rounds===1?'':'s'}</strong><span>{m.status==='complete'?'View results →':'View summary →'}</span></button>)}</div></section>}
     </main>}
-    {((!launching&&!room&&tab==='create')||(room?.phase==='lobby'&&tab==='party-create'&&isHost))&&<main className="creator studio">{room&&<div className="party-create-banner"><strong>Making a game for party {room.roomId.toUpperCase()}</strong><button className="secondary" onClick={returnToParty}>← Return to your party</button><p>Your friends stay connected. Publish a game, then add it to the party.</p></div>}{guest&&<GameEditor projectId={editorId} remix={remix} token={guest.token} api={api} onOpen={openEditor} onPublished={()=>void loadLibrary()} onAdd={room?addCreationToParty:undefined}/>}</main>}
-    {!launching&&room&&!inLobby&&tab!=='party-create'&&<main className="party-page">{room.phase!=='match-result'&&<div className="party-top" data-arrow-ignore><button className="text-button" onClick={leave}>← Back to the arcade</button><span>PARTY {room.roomId.toUpperCase()}</span></div>}
-      {room.phase==='match-result'?<section className="match-results"><div className="eyebrow">FINAL SCORES</div><h1>{room.error?'Round interrupted':'GAME OVER'}</h1>{room.error&&<p>{resultMessage(room.error)}</p>}<div className="standings">{[...room.seats].sort((a:any,b:any)=>b.points-a.points).map((s:any,i:number)=><div key={s.id}><span className="rank">{i+1}</span><span style={{background:s.color}} className="mini-face">•‿•</span><strong>{s.name}</strong><span>{room.roundCount===1?`${new Intl.NumberFormat(undefined,{maximumFractionDigits:1}).format(room.results.find((r:any)=>r.playerId===s.id)?.score??0)} ${meta.score.unit}`:`${s.points} pts`}</span></div>)}</div><MatchRatings matchId={room.matchId} api={api} onRated={(id,summary)=>setRatings(current=>({...current,[id]:summary}))}/><div className="result-buttons">{isHost&&<button className="primary" data-nav-start disabled={!connected} onClick={()=>send({type:'start',newSeed:true})}>▶ Play again</button>}<button className="secondary" data-nav-start={!isHost||undefined} onClick={leave}>Back to arcade</button></div></section>:<GameCabinet manifest={room.manifest} view={room.view} seats={room.seats} round={`ROUND ${room.round+1} / ${room.roundCount}`} network={room.network?.ready?`${Math.round(room.network.rtt)} ms`:'SYNCING'} mode={room.mode} controls={<>{<Controller active={playing} epoch={room.epoch} label={meta.controls.action} send={(edges,method)=>send({type:'input',edges,method,clientTime:performance.now(),seq:++seq.current,matchId:room.matchId,round:room.round,epoch:room.epoch})}/>}<button data-arrow-ignore className="cabinet-menu-button" onClick={()=>setCabinetMenu(true)}>MENU <kbd>ESC</kbd></button></>}><GameCanvas key={room.manifest.id} manifest={room.manifest} view={room.view} feedback={feedback.current} serverNow={()=>networkClock.current.now()} onLoaded={()=>send({type:'loaded',versionId:room.manifest.id})} onError={message=>{setError(message);send({type:'asset-error'});}}/>{!connected&&<div className="game-overlay"><h2>Party disconnected</h2><p>Your controls are paused.</p></div>}{connected&&room.phase==='preparing'&&<div className="game-overlay"><span className="eyebrow">GET YOUR BUTTONS READY</span><h2>Loading a little trouble…</h2></div>}{connected&&room.phase==='countdown'&&<div className="game-overlay countdown"><span>{countdown}</span><p>{meta.controls.action} = SPACE</p></div>}{room.phase==='round-result'&&<div className="game-overlay result-overlay"><span className="eyebrow">ROUND COMPLETE</span><h2>{room.view?.outcomes?.[room.playerId]==='failure'?'So close!':'Nice little round.'}</h2><div className="round-scores">{room.results.map((r:any)=><span key={r.playerId}><strong>{r.name}</strong> {new Intl.NumberFormat(undefined,{maximumFractionDigits:1}).format(r.score)} {meta.score.unit}</span>)}</div></div>}</GameCabinet>}
+    {((!launching&&!room&&tab==='create')||(room?.phase==='lobby'&&tab==='party-create'&&isHost))&&<main className="creator studio">{!room&&<button className="text-button" onClick={goHome}>← Back to arcade</button>}{room&&<div className="party-create-banner"><strong>Making a game for party {room.roomId.toUpperCase()}</strong><button className="secondary" onClick={returnToParty}>← Return to your party</button><p>Your friends stay connected. Publish a game, then add it to the party.</p></div>}{guest&&<GameEditor projectId={editorId} remix={remix} token={guest.token} api={api} onOpen={openEditor} onPublished={()=>void loadLibrary()} onAdd={room?addCreationToParty:undefined}/>}</main>}
+    {!launching&&room&&!inLobby&&tab!=='party-create'&&<main className="party-page">{room.phase!=='match-result'&&<div className="party-top" data-arrow-ignore><button className="text-button" onClick={()=>leave()}>← Leave party</button><span>PARTY {room.roomId.toUpperCase()}</span></div>}
+      {room.phase==='match-result'?<section className="match-results"><div className="eyebrow">FINAL SCORES</div><h1>{room.error?'Round interrupted':'GAME OVER'}</h1>{room.error&&<p>{resultMessage(room.error)}</p>}<div className="standings">{[...room.seats].sort((a:any,b:any)=>b.points-a.points).map((s:any,i:number)=><div key={s.id}><span className="rank">{i+1}</span><span style={{background:s.color}} className="mini-face">•‿•</span><strong>{s.name}</strong><span>{room.roundCount===1?`${new Intl.NumberFormat(undefined,{maximumFractionDigits:1}).format(room.results.find((r:any)=>r.playerId===s.id)?.score??0)} ${meta.score.unit}`:`${s.points} pts`}</span></div>)}</div><MatchRatings matchId={room.matchId} api={api} onRated={(id,summary)=>setRatings(current=>({...current,[id]:summary}))}/><div className="result-buttons">{isHost?<><button className="primary" data-nav-start disabled={!connected||partyPending} onClick={()=>partyCommand('edit-party')}>Choose new games</button><button className="secondary" disabled={!connected||partyPending} onClick={()=>{setPartyPending(true);send({type:'start',newSeed:true});}}>Play these games again</button></>:<p role="status">Your host can take everyone back to the lobby to choose new games.</p>}</div><PartyActions room={room} isHost={isHost} disabled={!connected||partyPending} onLeave={leave} onDisband={()=>partyCommand('disband')}/></section>:<GameCabinet manifest={room.manifest} view={room.view} seats={room.seats} round={`ROUND ${room.round+1} / ${room.roundCount}`} network={room.network?.ready?`${Math.round(room.network.rtt)} ms`:'SYNCING'} mode={room.mode} controls={<>{<Controller active={playing} epoch={room.epoch} label={meta.controls.action} send={(edges,method)=>send({type:'input',edges,method,clientTime:performance.now(),seq:++seq.current,matchId:room.matchId,round:room.round,epoch:room.epoch})}/>}<button data-arrow-ignore className="cabinet-menu-button" onClick={()=>setCabinetMenu(true)}>MENU <kbd>ESC</kbd></button></>}><GameCanvas key={room.manifest.id} manifest={room.manifest} view={room.view} feedback={feedback.current} serverNow={()=>networkClock.current.now()} onLoaded={()=>send({type:'loaded',versionId:room.manifest.id})} onError={message=>{setError(message);send({type:'asset-error'});}}/>{!connected&&<div className="game-overlay"><h2>Party disconnected</h2><p>Your controls are paused.</p></div>}{connected&&room.phase==='preparing'&&<div className="game-overlay"><span className="eyebrow">GET YOUR BUTTONS READY</span><h2>Loading a little trouble…</h2></div>}{connected&&room.phase==='countdown'&&<div className="game-overlay countdown"><span>{countdown}</span><p>{meta.controls.action} = SPACE</p></div>}{room.phase==='round-result'&&<div className="game-overlay result-overlay"><span className="eyebrow">ROUND COMPLETE</span><h2>{room.view?.outcomes?.[room.playerId]==='failure'?'So close!':'Nice little round.'}</h2><div className="round-scores">{room.results.map((r:any)=><span key={r.playerId}><strong>{r.name}</strong> {new Intl.NumberFormat(undefined,{maximumFractionDigits:1}).format(r.score)} {meta.score.unit}</span>)}</div></div>}</GameCabinet>}
       {connected&&room.phase==='countdown'&&room.round===0&&<CartridgeIntro key={room.matchId} playlist={room.playlist} startsAt={room.startsAt} now={clock}/>}
     </main>}
     <div className="arcade-keybar" aria-live="polite">{['create','party-create'].includes(tab)?<><span>GAME STUDIO</span>Play, ask for a change, repeat · Publish when you’re happy</>:editing?<><span>EDIT MODE</span>Type or use arrows to change · <kbd>ESC</kbd> finish editing</>:playing?<><span>PLAYER CONTROL</span><kbd>WASD / ↑↓←→</kbd> move <kbd>SPACE</kbd> {meta?.controls.action} <kbd>ESC</kbd> menu</>:<><span>FREE PLAY</span><kbd>WASD / ↑↓←→</kbd> select <kbd>SPACE / ENTER</kbd> confirm <kbd>ESC</kbd> {matchSummary||soundPanel||cabinetMenu?'back':'options'}</>}</div>
-    {matchSummary&&<MatchSummary match={matchSummary} close={()=>setMatchSummary(null)}/>}{(!room||inLobby)&&<footer><span className="brand small">microfinity.</span><span>Made for your “one more round.”</span><span>WASD + SPACE + A LITTLE IMAGINATION</span></footer>}
+    {matchSummary&&<MatchSummary match={matchSummary} close={closeMatchSummary}><MatchRatings key={matchSummary.id} matchId={matchSummary.id} api={api} onRated={(id,summary)=>setRatings(current=>({...current,[id]:summary}))}/></MatchSummary>}{(!room||inLobby)&&<footer><span className="brand small">microfinity.</span><span>Made for your “one more round.”</span><span>WASD + SPACE + A LITTLE IMAGINATION</span></footer>}
   </div>;
 }
 function GameArt({kind}:{kind:string}){

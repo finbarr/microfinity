@@ -2,8 +2,9 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,readFile,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {Store,type Version} from '../server/store';
 import {getMatch} from '../server/matches';import {Room,roomRequestSchema} from '../server/rooms';
+import {playedRatings,rateCartridge} from '../server/ratings';
 import {compile,bootstrap} from '../server/compiler';import {Sandbox} from '../runtime/sandbox';
-class Socket {readyState=1;bufferedAmount=0;messages:any[]=[];send(s:string){this.messages.push(JSON.parse(s));}close(){this.readyState=3;}state(){return this.messages.filter(m=>m.type==='state').at(-1);}}
+class Socket {readyState=1;bufferedAmount=0;messages:any[]=[];closeCode=0;send(s:string){this.messages.push(JSON.parse(s));}close(code=1000){this.closeCode=code;this.readyState=3;}state(){return this.messages.filter(m=>m.type==='state').at(-1);}}
 
 test('room request contract accepts empty and existing selected/random requests without setup choices',()=>{
   assert.equal(roomRequestSchema.parse({lobby:true}).settings.targetPlayers,1);
@@ -105,5 +106,65 @@ test('live room inputs finish private attempts independently and persist the rig
     await until(()=>room!.phase==='match-result');
     const summary=await getMatch(store,room.matchId,host.id);assert.deepEqual(summary.record.rounds[0].records.map((r:any)=>r.score),[1,2]);
     assert.equal(summary.record.rounds[0].records[1].outcome,'success');assert.ok(!JSON.stringify(summary).includes('snapshot'));
+    const firstMatch=room.matchId,partyId=room.id,revision=room.revision;
+    await assert.rejects(()=>room!.message(b as any,{type:'edit-party'}),/Only the host/);
+    await assert.rejects(()=>room!.message(b as any,{type:'disband'}),/Only the host/);
+    await room.message(a as any,{type:'edit-party'});
+    assert.equal(room.id,partyId);assert.equal(room.phase,'lobby');assert.equal(room.matchId,'');
+    assert.equal(a.state().lastMatchId,firstMatch);assert.equal(b.state().lastMatchId,firstMatch);
+    assert.deepEqual(a.state().playlist,[]);assert.deepEqual(b.state().playlist,[]);
+    assert.deepEqual(room.seats.map(s=>s.guestId),[host.id,friend.id]);
+    assert.equal(room.settings.targetPlayers,2);assert.ok(room.revision>revision);
+    await assert.rejects(()=>room!.message(a as any,{type:'playlist',revision,versions:[version.id]}),/setup changed/);
+    // Every participant can still rate independently after the host moves on.
+    for(const guest of [host,friend])assert.equal((await playedRatings(store,firstMatch,guest.id)).length,1);
+    await rateCartridge(store,host.id,{versionId:version.id,stars:5});
+    await rateCartridge(store,friend.id,{versionId:version.id,stars:3});
+    assert.equal((await playedRatings(store,firstMatch,host.id))[0].stars,5);
+    assert.equal((await playedRatings(store,firstMatch,friend.id))[0].stars,3);
+    // An empty party can choose and start a shared random lineup in one command.
+    await room.message(a as any,{type:'start',revision:room.revision,random:{count:4,seed:123}});
+    assert.equal(room.id,partyId);assert.notEqual(room.matchId,firstMatch);assert.equal(room.phase,'preparing');
+    assert.deepEqual(a.state().playlist,b.state().playlist);assert.equal(room.versions.length,1);
+    await assert.rejects(()=>room!.message(a as any,{type:'disband'}),/Finish this match/);
+    await room.message(a as any,{type:'asset-error'});
+    await assert.rejects(()=>room!.message(b as any,{type:'leave',nextHostId:host.id}),/Only the host/);
+    await assert.rejects(()=>room!.message(a as any,{type:'leave',nextHostId:'missing'}),/connected friend/);
+    await room.message(a as any,{type:'leave',nextHostId:friend.id});
+    assert.equal(room.hostId,friend.id);assert.equal(a.readyState,3);
+    assert.equal(room.seats[0].name,host.name,'departing cannot rename the completed match standings');
+    assert.ok(a.messages.some(m=>m.type==='party-left'));
+    await room.disconnect(a as any);assert.equal(room.hostId,friend.id,'late close cannot steal hosting');
+    await room.message(b as any,{type:'edit-party'});
+    assert.equal(room.seats.length,1);assert.equal(room.settings.targetPlayers,1);
+    const returned=new Socket();await room.join(host,returned as any);
+    assert.equal(room.hostId,friend.id);assert.equal(returned.state().playerId,'p1');
+    await assert.rejects(()=>room!.message(returned as any,{type:'disband'}),/Only the host/);
+    await room.message(b as any,{type:'disband'});
+    assert.ok(room.isExpired());assert.equal(b.readyState,3);assert.equal(returned.readyState,3);
+    assert.ok(returned.messages.some(m=>m.type==='party-ended'));
+    const closedInvite=new Socket();await assert.rejects(()=>room!.join(host,closedInvite as any),/closed/);
+    assert.equal(closedInvite.closeCode,4004,'a disbanded invite ends immediately, before the room cleanup sweep');
+    const finalSummary=await getMatch(store,firstMatch,host.id);
+    assert.deepEqual(finalSummary,summary,'return, handoff and disband preserve the completed match');
+    assert.equal((await playedRatings(store,firstMatch,friend.id))[0].stars,3);
+  }finally{await room?.close();await store.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('explicit lobby departures free seats and do not leave phantom AI players',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'microfinity-party-leave-')),store=new Store(root,'');let room:Room|undefined;
+  try{
+    await store.init();const host=await store.guest(undefined,'Host'),friend=await store.guest(undefined,'Friend');
+    room=new Room(store,host.id,[],{botType:'scripted'});const a=new Socket(),b=new Socket();
+    await room.join(host,a as any);await room.join(friend,b as any);
+    await room.message(a as any,{type:'leave',nextHostId:friend.id});
+    assert.equal(room.hostId,friend.id);assert.equal(room.seats.length,1);assert.equal(room.settings.targetPlayers,1);
+    assert.equal(b.state().playerId,'p0');assert.equal(b.state().seats[0].guestId,friend.id);
+    const resumed=new Socket();await room.join(host,resumed as any);
+    assert.equal(resumed.state().playerId,'p1');assert.equal(room.hostId,friend.id);
+    await room.message(resumed as any,{type:'leave'});await room.message(b as any,{type:'leave'});
+    assert.equal(room.hostId,'');assert.equal(room.seats.length,0);
+    const fresh=new Socket();await room.join(host,fresh as any);
+    assert.equal(room.hostId,host.id);assert.equal(fresh.state().playerId,'p0');
   }finally{await room?.close();await store.close();await rm(root,{recursive:true,force:true});}
 });

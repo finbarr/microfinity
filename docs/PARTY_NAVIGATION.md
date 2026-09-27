@@ -1,6 +1,7 @@
 # Party continuation and browser navigation
 
-Implemented and validated locally. Not deployed.
+Deployed to https://microfinity.lol on September 26, 2026 (Pacific time),
+application release `a417c0e`.
 
 The arcade now uses URL-backed history for the studio, saved projects, remixes,
 library filters, party invites and saved match results. Back and Forward restore
@@ -43,3 +44,30 @@ with two clearly labeled three-second fixture cartridges and no generation worke
 or model credentials. For a second independent local guest, use `localhost:4318`
 with the same invite's room ID. The browser verification uses fixture games to
 exercise multiplayer lifecycle and navigation, not to evaluate generated quality.
+
+## Production acceptance
+
+The committed archive was built and type-checked on the Linux server, with the
+existing sandbox image and model settings. A backup completed before activation.
+No queued/working creations or playing matches were present at the switch.
+All 36 existing versions, 268 results and 61 asset hashes were preserved.
+The app and builder ran the exact release directory with zero restarts; nine
+deployed source hashes matched the committed files. Public health, built assets,
+database writes and authenticated WebSocket smoke checks passed.
+
+Two fresh production test guests completed a selected Toast Catch match, returned
+to the same empty lobby, then completed a shared random lineup. Checks covered
+host-only permissions, rating eligibility for each guest, atomic host handoff and
+departure, rejoining without reclaiming host authority, disband broadcasts, and
+immediate rejection of a closed invite. Original match results remained unchanged.
+The test did not submit ratings to public cartridges or call generation providers.
+Machine-readable evidence is in
+`artifacts/party-navigation/deployment/live-acceptance.json`.
+
+The production browser independently verified arcade → studio → Back → Forward,
+created party `89d0f33a`, rendered and completed Toast Catch, displayed the new
+post-match actions and optional ratings, and returned to the same lobby with an
+empty playlist. The test party was then disbanded through the UI. Screenshots are
+`deployment/production-results.png` and `deployment/production-lobby.png` under
+the artifact directory above. Final health checks remained green with zero app
+or builder restarts.

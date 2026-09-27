@@ -4,7 +4,7 @@ import type {RatingSummary} from '../shared/ratings';
 
 type CoverManifest=Manifest&{icon?:Asset};
 
-export function CartridgeCard({game,index,selected,rating,art,onToggle,onPlay,onRemix,disabled,inParty=false}:{game:Manifest;index:number;selected:boolean;rating?:RatingSummary;art:ReactNode;onToggle:()=>void;onPlay:()=>void;onRemix:()=>void;disabled:boolean;inParty?:boolean}){
+export function CartridgeCard({game,index,selected,rating,art,onToggle,onPlay,onRemix,disabled,busy=false,inParty=false}:{game:Manifest;index:number;selected:boolean;rating?:RatingSummary;art:ReactNode;onToggle:(control:HTMLButtonElement)=>void;onPlay:(control:HTMLButtonElement)=>void;onRemix:()=>void;disabled:boolean;busy?:boolean;inParty?:boolean}){
   const icon=(game as CoverManifest).icon;
   const {meta}=game;
   return <article className={`game-card ${selected?'picked':''}`} aria-label={`${meta.title} cartridge`}>
@@ -14,7 +14,7 @@ export function CartridgeCard({game,index,selected,rating,art,onToggle,onPlay,on
       <div className={`game-cover cover-${index%8}`}>
         {icon?<img className="generated-cover" src={icon.url} alt=""/>:art}
         <span className="game-number">{String(index+1).padStart(2,'0')}</span>
-        <button className="pick" disabled={disabled} aria-label={`${selected?'Remove':'Add'} ${meta.title} ${selected?'from':'to'} playlist`} aria-pressed={selected} onClick={onToggle}>{selected?'✓':'+'}</button>
+        <button className="pick" disabled={disabled} aria-disabled={disabled||busy} aria-label={`${selected?'Remove':'Add'} ${meta.title} ${selected?'from':'to'} playlist`} aria-pressed={selected} onClick={event=>{if(!busy)onToggle(event.currentTarget);}}>{selected?'✓':'+'}</button>
         <span className="cover-caption">{meta.tags[0]?.toUpperCase()}</span>
       </div>
       <div className="card-body">
@@ -25,7 +25,7 @@ export function CartridgeCard({game,index,selected,rating,art,onToggle,onPlay,on
         <p>{meta.description}</p>
       </div>
     </div>
-    <div className="card-footer"><button aria-label={inParty?`${selected?'Deselect':'Select'} ${meta.title} for party`:`Play ${meta.title}`} disabled={disabled} onClick={onPlay}>{inParty?(selected?'✓ SELECTED':'+ SELECT'):'▶ PLAY'}</button><button aria-label={`Remix ${meta.title}`} disabled={disabled} onClick={onRemix}>Remix</button></div>
+    <div className="card-footer"><button aria-label={inParty?`${selected?'Deselect':'Select'} ${meta.title} for party`:`Play ${meta.title}`} disabled={disabled} aria-disabled={disabled||busy} onClick={event=>{if(!busy)onPlay(event.currentTarget);}}>{inParty?(selected?'✓ SELECTED':'+ SELECT'):'▶ PLAY'}</button><button aria-label={`Remix ${meta.title}`} disabled={disabled} aria-disabled={disabled||busy} onClick={()=>{if(!busy)onRemix();}}>Remix</button></div>
     <div className="cartridge-contacts" aria-hidden="true"/>
   </article>;
 }

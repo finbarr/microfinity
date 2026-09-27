@@ -48,4 +48,28 @@ Checked locally on 2026-09-26:
   and preview input. `npm run check`, `npm run build`, and `git diff --check` pass.
 
 Local traces and screenshots are under `artifacts/party-regressions/` (ignored by
-Git). These fixes have not been deployed.
+Git).
+
+## Production acceptance
+
+Release `17cb783d0008ea9369ab21023bac693a8edd4aed` was committed, pushed, and
+deployed to `https://microfinity.lol` on 2026-09-26. Linux type checking and the
+production build passed, the builder configuration preflight passed, and the
+database/assets backup succeeded before activation. There were no running
+matches or queued/working generation turns at the switch.
+
+Both application services run from the new release with zero restarts. Public
+HTML and linked client assets match the release byte-for-byte; six relevant
+source files match the committed checkout. All 36 existing versions, 275 result
+records, and 61 assets retained their hashes. The existing builder image and
+model configuration were retained.
+
+Two fresh test guests completed manual and random matches, returned to the same
+party lobby, handed off the host, and disbanded. Stored results and rating
+eligibility remained available; no ratings were submitted.
+
+The production browser completed a direct solo Comet Catch game without the
+lobby-setting error and displayed the full-screen cartridge loader on rematch.
+The first plus selection retained focus and the clicked button's exact viewport
+position (172.1484375px from the top) while the selection bar appeared. Evidence
+is under `artifacts/party-regressions/deployment/`.

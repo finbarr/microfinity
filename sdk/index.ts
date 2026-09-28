@@ -14,6 +14,7 @@ export type Input = {
   edges: Edge[]; x: number; y: number; pressAge: Partial<Record<Button,number>>;
 };
 export type Inputs = Record<string, Input>;
+/** Controller ownership stays in the backend. Every player uses the same input contract. */
 export type Player = { id: string; name: string; color: string };
 export type Style = 'pixel' | 'cartoon' | 'doodle' | 'collage';
 export type Outcome = 'success' | 'failure' | 'complete' | 'eliminated';

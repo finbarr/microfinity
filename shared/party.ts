@@ -21,3 +21,6 @@ export function eligibleGames<T extends {meta:Metadata;provenance:{draft?:unknow
   &&(filters.controls==='all'||g.meta.controls.directions===(filters.controls==='directions'))
   &&(!filters.tags.length||filters.tags.some(tag=>g.meta.tags.includes(tag))));
 }
+
+/** AI seats do not turn a solo session into a social party. */
+export function isSoloParty(room:{seats:{connected:boolean;guestId?:string}[]}){return room.seats.filter(s=>s.connected&&s.guestId).length<=1;}

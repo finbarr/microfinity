@@ -33,3 +33,15 @@ test('native party cartridges never show an obstruction label',async()=>{
   const modified=renderToStaticMarkup(createElement(GameCabinet,{manifest,view:{},round:'ROUND 1',mode:'obstruction',children:null}));
   assert.match(modified,/OBSTRUCTION/);
 });
+
+
+test('solo navigation counts humans, so three AI opponents never show party management',async()=>{
+  const {PartyActions}=await import('../client/PartyActions');
+  const props={isHost:true,disabled:false,onLeave:()=>{},onDisband:()=>{}};
+  const room={...baseRoom,seats:[baseRoom.seats[0],...['Pip','Zig','Dot'].map(name=>({name,connected:false}))]};
+  const solo=renderToStaticMarkup(createElement(PartyActions,{...props,room}));
+  assert.match(solo,/Back to arcade/);assert.doesNotMatch(solo,/Manage party|Leave party|Disband/);
+  const social={...room,seats:[...room.seats,{name:'Friend',guestId:'friend',connected:true}]};
+  assert.match(renderToStaticMarkup(createElement(PartyActions,{...props,room:social})),/Manage party/);
+  assert.match(renderToStaticMarkup(createElement(PartyActions,{...props,isHost:false,room:social})),/Leave party/);
+});

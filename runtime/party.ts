@@ -25,7 +25,7 @@ export class PartyRuntime {
     const worlds=groups.map(group=>{
       const players=group.map((p,i)=>({...p,id:`p${i}`})),members=group.map((p,i)=>({id:p.id,local:`p${i}`}));
       const bots:Record<string,Buttons>={};
-      while(players.length<meta.players[0]){const id=`p${players.length}`;players.push({id,name:`Practice rival ${players.length}`,color:'#a1a1aa'});bots[id]=emptyButtons();}
+      while(players.length<meta.players[0]){const id=`p${players.length}`;players.push({id,name:`Player ${players.length+1}`,color:'#a1a1aa'});bots[id]=emptyButtons();}
       const status=call('init',{...config,players},'native');
       return {players,members,bots,status,snapshot:call('save'),pendingDt:0,deadline:Math.min(10,meta.duration),nextBotAt:.2};
     });

@@ -33,7 +33,7 @@ test('lobby bot ownership, queue revisions and generation phase preserve pinned 
     await room.disconnect(b as any);assert.equal(room.seats[1].controller,'scripted');
     await room.message(a as any,{type:'remove-bot',playerId:'p1'});assert.equal(room.seats.length,1);
     await room.message(a as any,{type:'playlist',revision:room.revision,versions:[asteroid.id,toast.id]});assert.equal(room.seats.length,1,'the lobby holds human places until start');
-    await room.message(a as any,{type:'start'});assert.equal(room.seats.length,2,'a game needing an opponent adds AI at start');assert.notEqual(room.challengeId,original);
+    await room.message(a as any,{type:'start'});assert.equal(room.seats.length,4,'one human receives three backend opponents at start');assert.notEqual(room.challengeId,original);
     const [saved]=await store.query('SELECT definition FROM challenges WHERE id=$1',[original]);assert.deepEqual(saved.definition.versions,[asteroid.id,toast.id]);assert.deepEqual(saved.definition.settings.botTypes,['scripted','scripted']);
     await room.message(a as any,{type:'asset-error'});await room.message(a as any,{type:'edit-party'});
     await room.join(friend,b as any);await room.message(a as any,{type:'add-bot'});await room.join(third,c as any);

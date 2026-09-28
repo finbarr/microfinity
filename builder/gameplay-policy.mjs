@@ -1,12 +1,15 @@
 // Shared by the design brief and the coding agent. Bump when cached briefs need replanning.
-export const GAMEPLAY_POLICY_VERSION = 1;
+export const GAMEPLAY_POLICY_VERSION = 2;
 
 export const GAMEPLAY_POLICY = `Microfinity multiplayer rules:
 - Competitive by default. Use cooperative goals/shared victory only when the user's
   original idea or accepted requests explicitly ask for cooperation. Stacking,
   sharing an arena, or interacting with another character does not imply cooperation.
   Attribute competitive rewards and outcomes to the player who earns them.
-- Each human has an independent controller/device with the SAME directions and Space.
+- Human and AI ownership exists only in the backend. Never implement bots or
+  automatic moves for participant characters inside a cartridge, or detect who
+  controls a seat. Every participant acts only through its supplied inputs.
+- Each participant has an independent controller/device with the SAME directions and Space.
   Each player controls only their own single character, paddle, cursor, or equivalent
   participant at a time. Shared world means shared simulation, never shared controls.
   Read inputs[player.id] only for that player's actions. Never pool inputs, switch

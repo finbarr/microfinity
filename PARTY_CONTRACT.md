@@ -14,7 +14,7 @@ Integration update: the user has assigned removal of replay UI, APIs and recordi
 
 - A lobby has 1–4 human capacity. The creator occupies the host seat when connected. A join assigns the same guest back to its prior seat on reconnect; a new join takes a free human seat. A fifth distinct human receives a clear full-room error. On host disconnect, the connected host successor is authoritative; reconnecting guest identity and seat are preserved where possible.
 - Queue edits and start are accepted only from the current host and only in the lobby. Reject stale revisions and changes after start. Joiners never control games or AI seats from setup UI.
-- Engine owns player slots and any AI seats. The lobby grows as guests join, up to four seats; it reserves the creator even if an invitee connects first. At start it fills any required legacy minimum with AI seats, preserving explicit older target counts. Slots are stable `p0`…`p3` throughout a match. Do not expose internal `native`, `race`, `obstruction`, `pressure`, or `party-v1` adapter choices in normal UI.
+- Engine owns player slots and any AI seats. The lobby grows as guests join, up to four seats; it reserves the creator even if an invitee connects first. At start, one connected human always gets three backend AI opponents. With multiple humans it fills any required legacy minimum, preserving explicit older target counts. Slots are stable `p0`…`p3` throughout a match. Do not expose internal `native`, `race`, `obstruction`, `pressure`, or `party-v1` adapter choices in normal UI.
 - A full room rejects additional joins. Reconnecting the same guest resumes its seat and current round subject to existing epoch/input ownership checks. A disconnected human seat falls back to the engine controller until that guest resumes; it does not become a second human.
 
 ## Party continuation and navigation (September 2026)
@@ -39,7 +39,17 @@ Integration update: the user has assigned removal of replay UI, APIs and recordi
   replaying start, playlist, handoff or disband commands. Returning through history
   always uses the server's current phase and host, never historical authority.
 
+- When only one human is connected, navigation says **Back to arcade** and offers no
+  party management or disbanding. AI seats do not count as social party members.
+  Solo **Choose new games** returns directly to the arcade; multiplayer keeps its lobby.
+
 ## Cartridge and generation contract
+
+- Cartridges receive only ordinary player IDs, names, colors and inputs. Controller
+  ownership, AI providers, scheduling and decisions belong to the backend. No bot
+  hooks, AI flags or automatic player moves belong in cartridges. An AI request may
+  use public rules/source and the seat's filtered observation/history, never the
+  private runtime snapshot, seed or another seat's private observation.
 
 - All new cartridges are playable for 1–4 human participants. Generation is prompt-driven: no author/user choice for min/max players or clock. The model selects realtime vs action clock from the prompt. **Worker01: omit `meta.players` and `meta.modifiers` in new `defineGame` sources** (SDK defaults are `[1,4]` and `[]`). For `participation:'individual'`, author a single attempt against `ctx.players[0]`; the engine runs a separate equal-seed attempt for every participant. For `simultaneous` or `rotating`, author the shared rules against the actual `ctx.players` array for any length 1–4. Keep `role` and bounded timeout behavior correct for that array. Explicit old metadata remains accepted when remixing old sources.
 - Keep reading saved versions' historical `players`, `clock`, participation/world, and modifier metadata as compatibility input. Do not claim broader native participation by changing metadata alone; runtime behavior, observation isolation, score/outcome mapping, turn/input ownership, bounded finish and replay data must agree.

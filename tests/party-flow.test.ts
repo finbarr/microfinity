@@ -71,7 +71,22 @@ test('empty lobbies admit four guests, enforce host ownership, start without rea
     await quick.message(q as any,{type:'start',revision:quick.revision,random:{seed:4,count:1}});
     assert.equal(quick.phase,'preparing');assert.equal(quick.versions.length,1);
     assert.equal(quick.seats.filter(s=>s.controller==='human').length,1);
-    assert.equal(quick.seats.length,Math.max(1,quick.versions[0].manifest.meta.players[0]));
+    assert.equal(quick.seats.length,4);
+    assert.equal(quick.seats.filter(s=>s.controller!=='human').length,3);
+    assert.ok(quick.seats.slice(1).every(s=>!s.guestId));
+    assert.equal(q.state().settings.targetPlayers,4);
+    await quick.message(q as any,{type:'asset-error'});
+    await quick.message(q as any,{type:'edit-party'});
+    assert.equal(quick.seats.length,1);
+    await quick.message(q as any,{type:'start',revision:quick.revision,versions:[versions[0].id]});
+    assert.equal(quick.seats.length,4,'choosing new games refills solo opponents');
+    await quick.message(q as any,{type:'asset-error'});
+    await quick.message(q as any,{type:'start',newSeed:true});
+    assert.equal(quick.seats.length,4,'rematches keep exactly three opponents');
+    await quick.message(q as any,{type:'leave'});
+    assert.ok(quick.isExpired(),'leaving solo play stops the room and its AI calls');
+    const [ended]=await store.query('SELECT status FROM matches WHERE id=$1',[quick.matchId]);
+    assert.equal(ended.status,'aborted');
   }finally{await Promise.all(rooms.map(r=>r.close()));await store.close();await rm(root,{recursive:true,force:true});}
 });
 
@@ -167,4 +182,37 @@ test('explicit lobby departures free seats and do not leave phantom AI players',
     const fresh=new Socket();await room.join(host,fresh as any);
     assert.equal(room.hostId,host.id);assert.equal(fresh.state().playerId,'p0');
   }finally{await room?.close();await store.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('three backend AI seats receive private views and score through ordinary cartridge inputs',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'microfinity-ai-seats-')),store=new Store(root,'');let room:Room|undefined;
+  const oldKey=process.env.TYPESAFE_API_KEY;process.env.TYPESAFE_API_KEY='local-fixture';
+  const calls:any[]=[];
+  t.mock.method(globalThis,'fetch',async(_url:unknown,request:RequestInit)=>{
+    const body=JSON.parse(request.body as string);calls.push(body);
+    const held=body.state.you.currentButtons??body.state.you.held;
+    return new Response(JSON.stringify({model:'local-test',answers:{action:{choice:body.questions.action.criteria.held?(held.action?'released':'held'):(held.action?'neutral':'neutral_action'),confidence:1}}}));
+  });
+  try{
+    await store.init();const guest=await store.guest(undefined,'Human');
+    const source=`import {defineGame} from '@microfinity/sdk';export default defineGame({
+      meta:{id:'unknown-ai-boundary',title:'Tap',description:'Tap to score',instruction:'Tap',rules:'Each fresh press scores one.',clock:'realtime',participation:'individual',world:'independent',duration:3,style:'pixel',score:{unit:'taps',order:'higher'},controls:{directions:false,action:'Tap'},tags:[]},
+      init(ctx){if(ctx.players.some(p=>Object.keys(p).sort().join(',')!=='color,id,name'))throw Error('Controller ownership leaked');return {id:ctx.players[0].id,secret:'never-send-private-state',taps:0};},
+      step(s,inputs,ctx){if(inputs[s.id].pressed.action){s.taps++;ctx.addScore(s.id,1);}if(ctx.time>=.9){ctx.finishPlayer(s.id,s.taps?'success':'failure');ctx.finishRound();}},
+      observe(s){return {me:s.id,taps:s.taps};},draw(v,g){g.text(String(v.taps),10,10);}});`;
+    const code=await compile(source),vm=await Sandbox.create(code,await bootstrap());
+    const meta=vm.call('meta').meta;vm.dispose();const version=await store.putVersion(source,code,meta);
+    room=new Room(store,guest.id,[version]);const socket=new Socket();await room.join(guest,socket as any);
+    await room.message(socket as any,{type:'start'});await room.message(socket as any,{type:'loaded',versionId:version.id});
+    const end=performance.now()+8000;while(room.phase!=='round-result'&&performance.now()<end)await new Promise(r=>setTimeout(r,20));
+    assert.equal(room.phase,'round-result');assert.equal(room.seats.length,4);
+    const results=socket.state().results;assert.equal(results[0].score,0);
+    assert.ok(results.slice(1).every((r:any)=>r.score>0&&r.controllers.join(',')==='jev'));
+    assert.ok(calls.length>=3);
+    for(const call of calls){
+      assert.equal(call.state.you.playerId,'p0','external controller sees its private world ID');
+      assert.deepEqual(Object.keys(call.state.visibleNow).sort(),['me','taps']);
+      assert.equal(call.state.visibleNow.secret,undefined);
+    }
+  }finally{await room?.close();await store.close();await rm(root,{recursive:true,force:true});if(oldKey===undefined)delete process.env.TYPESAFE_API_KEY;else process.env.TYPESAFE_API_KEY=oldKey;}
 });

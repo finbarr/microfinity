@@ -7,11 +7,13 @@ import { edgeSchema } from '../runtime/validation';
 import type { Mode } from '../runtime/modes';
 import { Store, id, hash, type Version } from './store';
 import { RuntimeProcess } from './runtime-process';
-import { DecisionScheduler, jevDecision, scriptedDecision } from './controllers';
+import { DecisionScheduler, jevDecision, scriptedDecision, configuredJevStrategy } from './controllers';
 import {selectPlaylist,randomSchema,type Selection} from './playlists';
 import {NetworkClock, serverNow, MAX_COMPENSATION_MS} from './network-clock';
 import {effectiveMode,participantCounts,type BotType} from '../shared/party';
+import {navigationButtons,type NavigationTarget} from './controller-navigation';
 import {COUNTDOWN_MS} from '../shared/countdown';
+const opponentNames=['Pip','Zig','Dot','Moss'];
 type QueuedEdge=Edge & {at?:number;compensate?:boolean};
 
 export const settingsSchema=z.object({targetPlayers:z.number().int().min(1).max(4).default(1),botType:z.enum(['jev','scripted']).default('jev'),botTypes:z.array(z.enum(['jev','scripted'])).max(4).default([]),mode:z.enum(['native','race','obstruction','pressure']).default('native'),difficulty:z.number().int().min(0).max(3).default(1),seed:z.number().int().min(0).max(4294967295).default(()=>randomBytes(4).readUInt32LE())});
@@ -19,7 +21,7 @@ const versionIds=z.array(z.string().length(64)).max(12);
 export const roomRequestSchema=z.object({versions:versionIds.optional(),random:randomSchema.optional(),lobby:z.boolean().optional(),settings:settingsSchema.prefault({})})
   .refine(v=>v.versions===undefined||v.random===undefined,'Choose a pinned list or a random selection');
 export type Settings=z.infer<typeof settingsSchema>;
-type Seat={id:string;name:string;color:string;guestId?:string;ws?:WebSocket;ready:boolean;loaded:boolean;controller:'human'|'jev'|'scripted';botType:BotType;epoch:number;seq:number;held:Buttons;queued:QueuedEdge[];clock:NetworkClock;rejected:Record<string,number>;scheduler:DecisionScheduler;history:any[];lastInput:number;methods:Set<string>;sources:Set<string>;fallback?:string};
+type Seat={id:string;name:string;color:string;guestId?:string;ws?:WebSocket;ready:boolean;loaded:boolean;controller:'human'|'jev'|'scripted';botType:BotType;epoch:number;seq:number;held:Buttons;queued:QueuedEdge[];clock:NetworkClock;rejected:Record<string,number>;scheduler:DecisionScheduler;history:any[];lastInput:number;methods:Set<string>;sources:Set<string>;fallback?:string;navigation?:{target:NavigationTarget;until:number}};
 export class Room {
   readonly id=id().slice(0,8);hostId:string;settings:Settings;versions:Version[];
   phase:'lobby'|'preparing'|'countdown'|'playing'|'round-result'|'match-result'='lobby';
@@ -39,7 +41,7 @@ export class Room {
     this.seats[0].guestId=hostId;this.seats[0].name='Host';this.syncBotSettings();
     this.timer=setInterval(()=>void this.pump(),8);
   }
-  private makeSeat(index:number):Seat {const botType=this.settings.botTypes[index]??this.settings.botType;return {id:`p${index}`,name:`${botType==='jev'?'Jev':'Bot'} ${index+1}`,color:colors[index],ready:true,loaded:false,controller:botType,botType,epoch:0,seq:0,held:emptyButtons(),queued:[],clock:new NetworkClock(),rejected:{},scheduler:new DecisionScheduler(Number(process.env.JEV_INTERVAL_MS)||200),history:[],lastInput:0,methods:new Set(),sources:new Set()};}
+  private makeSeat(index:number):Seat {const botType=this.settings.botTypes[index]??this.settings.botType;return {id:`p${index}`,name:opponentNames[index],color:colors[index],ready:true,loaded:false,controller:botType,botType,epoch:0,seq:0,held:emptyButtons(),queued:[],clock:new NetworkClock(),rejected:{},scheduler:new DecisionScheduler(Number(process.env.JEV_INTERVAL_MS)||200),history:[],lastInput:0,methods:new Set(),sources:new Set()};}
   private syncBotSettings(){this.settings.targetPlayers=this.seats.length;this.settings.botTypes=this.seats.map(s=>s.botType);}
   private setupChanged(){this.challengeId='';this.revision++;this.syncBotSettings();for(const s of this.seats)s.ready=!s.ws;this.broadcast();}
   renameGuest(guestId:string,name:string){return this.sequence(()=>{
@@ -69,7 +71,7 @@ export class Room {
     this.lastActivity=serverNow();if(!this.seats.some(s=>s.ws))this.emptySince=this.lastActivity;
     this.broadcast();
   });}
-  private handoff(seat:Seat,controller:Seat['controller']){seat.epoch++;seat.seq=0;seat.queued.push(...buttonEdges(seat.held,emptyButtons()));seat.held=emptyButtons();seat.controller=controller;seat.history=[];seat.clock=new NetworkClock();seat.sources.add(controller);}
+  private handoff(seat:Seat,controller:Seat['controller']){seat.epoch++;seat.seq=0;seat.queued.push(...buttonEdges(seat.held,emptyButtons()));seat.held=emptyButtons();seat.controller=controller;seat.navigation=undefined;seat.history=[];seat.clock=new NetworkClock();seat.sources.add(controller);}
   message(ws:WebSocket,message:any){return this.sequence(()=>this.handleMessage(ws,message));}
   private async handleMessage(ws:WebSocket,message:any){
     if(this.closed)return;
@@ -100,7 +102,15 @@ export class Room {
         this.revision++;
       }
       this.send(ws,{type:'party-left'});ws.close(4000,'party-left');
-      if(!this.seats.some(s=>s.ws))this.emptySince=serverNow();
+      if(!this.seats.some(s=>s.ws)){
+        this.emptySince=serverNow();
+        // Explicitly ending solo play must stop provider calls immediately.
+        // Transport disconnects keep the separate reconnect grace period.
+        if(this.matchId){
+          if(this.phase!=='match-result')await this.abort('left-game','abandoned');
+          this.closed=true;clearInterval(this.timer);this.runner?.dispose();this.runner=undefined;
+        }
+      }
       this.broadcast();return;
     }
     if(message.type==='disband'){
@@ -136,8 +146,8 @@ export class Room {
         const target=this.seats.find(s=>s.id===message.playerId);if(!target||target.ws)throw new Error('Choose an empty bot seat');
         if(message.type==='remove-bot'){
           if(!participantCounts(this.versions.map(v=>v.manifest),this.settings.mode).includes(this.seats.length-1))throw new Error('This queue needs the current number of seats');
-          this.seats=this.seats.filter(s=>s!==target);this.seats.forEach((s,i)=>{s.id=`p${i}`;s.color=colors[i];s.epoch++;s.seq=0;s.held=emptyButtons();s.queued=[];if(!s.guestId)s.name=`${s.botType==='jev'?'Jev':'Bot'} ${i+1}`;});
-        }else{target.botType=z.enum(['jev','scripted']).parse(message.controller);if(!target.guestId)target.name=`${target.botType==='jev'?'Jev':'Bot'} ${this.seats.indexOf(target)+1}`;this.handoff(target,target.botType);}
+          this.seats=this.seats.filter(s=>s!==target);this.seats.forEach((s,i)=>{s.id=`p${i}`;s.color=colors[i];s.epoch++;s.seq=0;s.held=emptyButtons();s.queued=[];if(!s.guestId)s.name=opponentNames[i];});
+        }else{target.botType=z.enum(['jev','scripted']).parse(message.controller);if(!target.guestId)target.name=opponentNames[this.seats.indexOf(target)];this.handoff(target,target.botType);}
       }
       this.setupChanged();return;
     }
@@ -179,7 +189,8 @@ export class Room {
     if(!this.versions.length)throw new Error('Choose games or a random selection before starting');
     this.rematchOf=this.phase==='match-result'?this.matchId:null;
     if(newSeed)this.settings.seed=randomBytes(4).readUInt32LE();
-    const count=Math.max(this.settings.targetPlayers,...this.versions.map(v=>v.manifest.meta.players[0]));
+    const solo=this.seats.filter(s=>s.ws).length===1;
+    const count=Math.max(solo?4:this.settings.targetPlayers,...this.versions.map(v=>v.manifest.meta.players[0]));
     while(this.seats.length<count)this.seats.push(this.makeSeat(this.seats.length));
     this.syncBotSettings();
     this.round=0;this.rounds=[];this.points={};this.error='';this.matchId=id();this.startedAt=serverNow();this.finishedAt=null;this.termination=null;
@@ -195,7 +206,7 @@ export class Room {
     const version=this.versions[this.round],meta=version.manifest.meta;
     await this.store.query("INSERT INTO round_attempts(match_id,round_index,version_id,status) VALUES($1,$2,$3,'preparing') ON CONFLICT DO NOTHING",[this.matchId,this.round,version.id]);
     const mode=effectiveMode(meta,this.seats.length,this.settings.mode);if(!mode)throw new Error('Playlist incompatible with participant count');this.mode=mode;
-    for(const seat of this.seats){seat.loaded=!seat.ws;seat.queued=[];seat.held=emptyButtons();seat.epoch++;seat.seq=0;seat.history=[];seat.methods=new Set();seat.rejected={};seat.fallback=undefined;seat.scheduler=new DecisionScheduler(Number(process.env.JEV_INTERVAL_MS)||200);seat.sources=new Set([seat.controller]);}
+    for(const seat of this.seats){seat.loaded=!seat.ws;seat.queued=[];seat.held=emptyButtons();seat.epoch++;seat.seq=0;seat.history=[];seat.methods=new Set();seat.rejected={};seat.fallback=undefined;seat.navigation=undefined;seat.scheduler=new DecisionScheduler(Number(process.env.JEV_INTERVAL_MS)||200);seat.sources=new Set([seat.controller]);}
     this.broadcast();this.runner=await RuntimeProcess.create(version.code,await this.store.runtime(version));
     this.status=await this.runner.call('init',{seed:(this.settings.seed+this.round)>>>0,difficulty:this.settings.difficulty,players:this.seats.map(({id,name,color})=>({id,name,color}))},this.mode);
     await this.snapshotViews();this.broadcast();
@@ -232,7 +243,7 @@ export class Room {
     const edges:Record<string,Edge[]>={};
     for(const s of this.seats){const ready:Edge[]=[];while(s.queued.length&&(s.queued[0].at??tickTime)<=tickTime){const {at,compensate,...edge}=s.queued.shift()!;ready.push({...edge,...(!compensate||at===undefined?{}:{age:Math.min(MAX_COMPENSATION_MS,Math.max(0,tickTime-at))/1000})});}if(ready.length)edges[s.id]=ready;}
     const previousRoles=this.status?.roles??{};this.status=await this.runner.call('step',edges,dt,event);
-    for(const s of this.seats)if(previousRoles[s.id]!==this.status.roles[s.id]){s.epoch++;s.seq=0;s.queued=buttonEdges(s.held,emptyButtons());s.held=emptyButtons();this.actionDeadline=performance.now()+10000;}
+    for(const s of this.seats)if(previousRoles[s.id]!==this.status.roles[s.id]){s.navigation=undefined;s.epoch++;s.seq=0;s.queued=buttonEdges(s.held,emptyButtons());s.held=emptyButtons();this.actionDeadline=performance.now()+10000;}
     if(this.status.nextStepAt!==undefined)this.actionDeadline=performance.now()+Math.max(0,this.status.nextStepAt-this.status.time)*1000;
     if(this.status.feedback.length)this.broadcastEvent({type:'feedback',matchId:this.matchId,round:this.round,events:this.status.feedback});
     if(this.status.done)await this.finishRound();
@@ -243,7 +254,7 @@ export class Room {
     for(const seat of this.seats){
       const view=await this.runner.call('observe',seat.id);view.sampleTime=sampleTime;this.views[seat.id]=view;
       const phase=typeof view.game?.phase==='string'?`${view.game.round??0}:${view.game.phase}`:null;
-      const sample={tick:view.tick,phase,game:view.game},last=seat.history.at(-1);
+      const sample={tick:view.tick,time:view.time,phase,game:view.game,buttons:{...seat.held}},last=seat.history.at(-1);
       // Retain prior visible phases for memory tasks, even when the player's role changes.
       if(phase&&last?.phase===phase)seat.history[seat.history.length-1]=sample;
       else if(phase||!last||view.tick-last.tick>=12)seat.history.push(sample);
@@ -253,14 +264,18 @@ export class Room {
   private decide(now:number){
     const version=this.versions[this.round],meta=version.manifest.meta;
     for(const seat of this.seats){if(seat.controller==='human'||!this.views[seat.id]||this.views[seat.id].roles[seat.id]!==this.status?.roles[seat.id]||['waiting','finished','eliminated'].includes(this.status?.roles[seat.id]))continue;
+      if(seat.navigation){
+        if(now<seat.navigation.until)this.queue(seat,buttonEdges(seat.held,navigationButtons(this.views[seat.id].game,seat.navigation.target,seat.held)));
+        else{seat.navigation=undefined;this.queue(seat,buttonEdges(seat.held,emptyButtons()));}
+      }
       if(now-seat.lastInput>1000&&Object.values(seat.held).some(Boolean))this.queue(seat,buttonEdges(seat.held,emptyButtons()));
       const stamp=()=>({round:`${this.matchId}:${this.round}:${this.phase}`,epoch:seat.epoch,role:this.status?.roles[seat.id]??'',tick:this.status?.tick??0});
       seat.scheduler.opportunity(now,stamp(),async()=>{
         if(seat.controller==='scripted')return scriptedDecision(meta,this.views[seat.id],seat.held,seat.scheduler.serial);
         try{const latency=[...seat.scheduler.metrics].reverse().find(m=>m.source==='jev'&&m.latencyMs!==undefined)?.latencyMs??120;
-          return await jevDecision(meta,this.views[seat.id],seat.held,seat.history,undefined,{source:version.source,intervalMs:seat.scheduler.interval,expectedLatencyMs:Math.min(1200,latency),observationAgeMs:Math.max(0,serverNow()-this.views[seat.id].sampleTime)});}
+          return await jevDecision(meta,this.views[seat.id],seat.held,seat.history,undefined,{source:version.source,strategy:configuredJevStrategy(),intervalMs:seat.scheduler.interval,expectedLatencyMs:Math.min(1200,latency),observationAgeMs:Math.max(0,serverNow()-this.views[seat.id].sampleTime)});}
         catch(e){return {...scriptedDecision(meta,this.views[seat.id],seat.held,seat.scheduler.serial),error:(e as Error).message};}
-      },stamp,decision=>{if(seat.controller==='human')return;seat.sources.add(decision.source);seat.fallback=decision.error;this.queue(seat,buttonEdges(seat.held,decision.buttons));});
+      },stamp,decision=>{if(seat.controller==='human')return;seat.sources.add(decision.source);seat.fallback=decision.error;seat.navigation=decision.navigation?{target:decision.navigation,until:performance.now()+1000}:undefined;this.queue(seat,buttonEdges(seat.held,decision.navigation?navigationButtons(this.views[seat.id].game,decision.navigation,decision.buttons):decision.buttons));});
     }
   }
   private async finishRound(){

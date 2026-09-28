@@ -14,6 +14,11 @@ four party sizes must actually play. Solo must have attainable success and failu
 each seat must have useful input and scoring. End even with no input. Action games must
 consume a turn on ctx.event==='timeout'. Use finishPlayer for individual outcomes.
 Include a concise accurate public meta.rules with timing, scoring and win/loss details.
+The backend supplies every participant's inputs, including AI opponents. Cartridges
+must never implement AI, choose moves for players, or detect human versus AI ownership.
+Treat every ctx.players entry identically. Expose player-visible positions, motion,
+cooldowns and phases in observe so an external controller can infer legal next moves.
+Do not expose hidden answers or add recommended actions, bot hooks or AI-only state.
 
 Media is already generated and pinned. Declare its exact sprite name in assets and
 draw it using gfx.sprite when gfx.hasAsset; use a built-in actor fallback otherwise.

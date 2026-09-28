@@ -1,3 +1,4 @@
+import {isSoloParty} from '../shared/party';
 import {useState} from 'react';
 
 type Member = {guestId?: string; name: string; connected: boolean};
@@ -12,6 +13,7 @@ type Props = {
 export function PartyActions({room, isHost, disabled, onLeave, onDisband}: Props) {
   const [open, setOpen] = useState(false);
   const friends = room.seats.filter(member => member.connected && member.guestId && member.guestId !== room.hostId);
+  if (isSoloParty(room)) return <button className="text-button" disabled={disabled} onClick={() => onLeave()}>Back to arcade</button>;
   if (!isHost) return <button className="text-button" disabled={disabled} onClick={() => onLeave()}>Leave party</button>;
   return <div className="party-actions">
     <button className="text-button" disabled={disabled} aria-expanded={open} onClick={() => setOpen(!open)}>Manage party</button>

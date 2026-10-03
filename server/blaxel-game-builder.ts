@@ -78,6 +78,7 @@ export class BlaxelGameBuilder implements GameBuilder {
         throw Error('BLAXEL_BUILDER_IMAGE must be the versioned toolkit image returned by bl push');
       }
       await mkdir(evidence, {recursive: true});
+      await input.onStage?.('preparing');
       await prepareBuildDirectory(this.store, directory, input);
       await command('tar', ['-czf', join(directory, 'input.tar.gz'), '-C', directory, 'input', 'media', 'references'], {signal});
       // Separate microVMs: the coding agent cannot alter the validation toolkit.

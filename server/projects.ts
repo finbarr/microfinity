@@ -360,7 +360,7 @@ export class ProjectWorker {
         witnesses: base?.witnesses, feedback,
         onProgress: async (progress, savedMedia) => {
           controller.signal.throwIfAborted();
-          const stage = phase === 'art' ? 'art' : progress.branches.code === 'checking' ? 'validating' : progress.branches.code === 'working' ? 'building' : 'media';
+          const stage = phase === 'art' ? 'art' : progress.branches.code === 'checking' ? 'validating' : progress.branches.code === 'working' ? 'building' : progress.branches.code === 'preparing' ? 'preparing' : 'media';
           await this.fenced(turn, async query => {
             await query('UPDATE project_turns SET stage=$1,progress=$2 WHERE id=$3', [stage, JSON.stringify({public: progress, media: savedMedia}), turn.id]);
             await query('UPDATE projects SET media=$1,title=$2,updated_at=now() WHERE id=$3', [JSON.stringify(savedMedia), savedMedia.title ?? project.title, project.id]);

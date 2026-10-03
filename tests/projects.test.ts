@@ -103,6 +103,30 @@ test('event replay orders numeric cursors across digit boundaries and pages', as
   assert.deepEqual(await f.projects.events(project.id, f.a.id, Number(rest.at(-1)!.id)), []);
 });
 
+test('preparation, building and validation progress survive project reads and event replay', async t => {
+  const startedAt = Date.now();
+  const f = await fixture(t, {run: async input => {
+    for (const [code, stage, timings] of [
+      ['preparing', 'preparing', {prepareStart: startedAt}],
+      ['working', 'building', {prepareStart: startedAt, prepareEnd: startedAt + 10, codeStart: startedAt + 10}],
+      ['checking', 'validating', {codeStart: startedAt + 10, codeEnd: startedAt + 20, validationStart: startedAt + 20}],
+    ] as const) {
+      await input.onProgress({startedAt, branches: {code}, timings}, input.media);
+      const saved = (await f.projects.get(input.projectId, input.ownerId)).turns.at(-1)!;
+      assert.equal(saved.stage, stage);
+      assert.equal(saved.status, 'working');
+      assert.equal(saved.progress.startedAt, startedAt);
+      assert.deepEqual(saved.progress.timings, timings);
+    }
+    return result(input);
+  }});
+  const project = await f.create();
+  await (f.worker as any).execute((await f.worker.claim())!, new AbortController());
+  const events = await f.projects.events(project.id, f.a.id, 0);
+  assert.deepEqual(events.filter(event => event.kind === 'progress').map(event => event.payload.stage), ['preparing', 'building', 'validating']);
+  assert.equal((await f.projects.get(project.id, f.a.id)).turns.at(-1)!.status, 'ready');
+});
+
 test('retry preserves regenerated media checkpoints and original playtest feedback', async t => {
   const oldArt = {hash: 'a'.repeat(64), url: `/assets/${'a'.repeat(64)}.png`, name: 'toast', width: 1, height: 1};
   const newArt = {...oldArt, hash: 'b'.repeat(64), url: `/assets/${'b'.repeat(64)}.png`};

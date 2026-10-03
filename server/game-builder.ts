@@ -5,7 +5,7 @@ import type {Store,Asset} from './store';
 
 export type CodexSession={threadId:string;files:{path:string;text:string}[]};
 export type BuildSnapshot={png:string;sourceHash:string;players:number;seed:number;tick:number};
-export type BuildInput={jobId:string;projectId?:string;leaseTag?:string;ownerId?:string;session?:CodexSession;witnesses?:unknown;feedback?:unknown;onSnapshot?:(snapshot:BuildSnapshot)=>Promise<void>;onMessage?:(text:string)=>Promise<void>;prompt:string;brief:any;gameId:string;assets:Asset[];music:unknown;icon?:Asset;parent?:string;signal:AbortSignal;onStage?:(stage:'building'|'validating')=>Promise<void>};
+export type BuildInput={jobId:string;projectId?:string;leaseTag?:string;ownerId?:string;session?:CodexSession;witnesses?:unknown;feedback?:unknown;onSnapshot?:(snapshot:BuildSnapshot)=>Promise<void>;onMessage?:(text:string)=>Promise<void>;prompt:string;brief:any;gameId:string;assets:Asset[];music:unknown;icon?:Asset;parent?:string;signal:AbortSignal;onStage?:(stage:'preparing'|'building'|'validating')=>Promise<void>};
 export type BuildResult={session?:CodexSession;witnesses?:unknown;thread?:{threadId:string;resumed:boolean};source:string;code:string;runtime:string;meta:any;assets:string[];audio:any;reports:unknown[];model:string;reasoningEffort?:string;imageId?:string;usage:unknown;screenshots?:{players:number;png:string}[]};
 export type GameBuilder={build(input:BuildInput):Promise<BuildResult>};
 export function collectCandidate(stdout:string){

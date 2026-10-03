@@ -79,7 +79,7 @@ export class GenerationService {
     });
     const save = async () => {
       budget.check();
-      await input.onProgress({branches: {...job.branches}, title: job.title,
+      await input.onProgress({startedAt: job.startedAt, branches: {...job.branches}, title: job.title,
         models: {...job.models}, usage: job.usage, timings: {...job.timings},
         musicAttempts: job.musicAttempts,
         budget: {limits: this.limits, reserved: {...budget.usage}},
@@ -87,13 +87,14 @@ export class GenerationService {
     };
     try {
       const model=process.env.BRIEF_MODEL??'gpt-6-sol',musicModel=process.env.MUSIC_MODEL??'gpt-5-mini';
-      job.branches.brief='working';await work(()=>save());
+      const savedBrief = currentBrief(job.brief);
+      job.branches.brief=savedBrief?'reused':'working';job.timings.briefStart=Date.now();await work(()=>save());
       const previous=input.parent;
-      const brief = currentBrief(job.brief) ?? parseBrief(await work(() => this.json(
+      const brief = savedBrief ?? parseBrief(await work(() => this.json(
         job, model, 'brief', briefSchema, briefPrompt(job.prompt, previous), 4000,
       )));
       if(job.previewArt?.[0])brief.assetName=job.previewArt[0].name;
-      job.brief=brief;job.title=brief.title;job.branches.brief='ready';job.timings.briefMs=Date.now()-job.startedAt;await work(()=>save());
+      job.brief=brief;job.title=brief.title;job.branches.brief=savedBrief?'reused':'ready';job.timings.briefEnd=Date.now();job.timings.briefMs=job.timings.briefEnd-job.startedAt;await work(()=>save());
       const gameId=input.gameId;job.buildGameId=gameId;
       let assets:Asset[]=job.previewArt??[],music:any=job.previewMusic??null,icon:Asset|undefined=job.previewIcon;
       job.previewArt=assets;
@@ -154,7 +155,10 @@ export class GenerationService {
         feedback: input.feedback, signal: budget.signal,
         onSnapshot: input.onSnapshot, onMessage: input.onMessage,
         onStage: async stage => {
-          job.branches.code = stage === 'building' ? 'working' : 'checking';
+          const now = Date.now();
+          if (stage === 'preparing') {job.branches.code = 'preparing';job.timings.prepareStart = now;}
+          if (stage === 'building') {job.branches.code = 'working';job.timings.prepareEnd = now;job.timings.codeStart = now;}
+          if (stage === 'validating') {job.branches.code = 'checking';job.timings.codeEnd = now;job.timings.validationStart = now;}
           await work(save);
         },
       });

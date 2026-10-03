@@ -158,6 +158,32 @@ test('art review finishes without music or a builder and approval reuses the exa
   assert.equal(f.builds.length, 1);
 });
 
+test('build progress checkpoints preserve each real stage clock and identify reused plans', async () => {
+  const f = await fixture({builder: {build: async (input: any) => {
+    await input.onStage('preparing');
+    await input.onStage('building');
+    await input.onStage('validating');
+    return {source: 'fixture', code: 'fixture', runtime: 'fixture', reports: []};
+  }}});
+  const art = await f.service.run({...f.input, phase: 'art'});
+  f.writes.length = 0;
+  await f.service.run({...f.input, media: art.media});
+  const preparing = f.writes.find(write => write.progress.branches.code === 'preparing').progress;
+  const building = f.writes.find(write => write.progress.branches.code === 'working').progress;
+  const validating = f.writes.find(write => write.progress.branches.code === 'checking').progress;
+  assert.equal(preparing.branches.brief, 'reused');
+  assert.equal(preparing.branches.art, 'reused');
+  assert.equal(preparing.branches.icon, 'reused');
+  assert.ok(preparing.startedAt > 0);
+  assert.equal(building.startedAt, preparing.startedAt);
+  assert.equal(validating.startedAt, preparing.startedAt);
+  assert.equal(building.timings.prepareStart, preparing.timings.prepareStart);
+  assert.equal(building.timings.prepareEnd, building.timings.codeStart);
+  assert.equal(validating.timings.codeStart, building.timings.codeStart);
+  assert.equal(validating.timings.codeEnd, validating.timings.validationStart);
+  assert.ok(validating.timings.validationStart >= preparing.timings.prepareStart);
+});
+
 
 test('latest image feedback survives a long conversation before cover cues are truncated', async () => {
   const f = await fixture();

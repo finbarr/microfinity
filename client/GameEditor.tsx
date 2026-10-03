@@ -2,12 +2,12 @@ import {useEffect, useRef, useState} from 'react';
 import type {Manifest} from '../server/store';
 import {GamePreview} from './GamePreview';
 import {CreationCartridge} from './CreationCartridge';
+import {BuildProgress} from './BuildProgress';
 import './editor.css';
 
 type API = (path: string, body?: unknown) => Promise<any>;
 type Props = {projectId: string | null; remix?: string; token: string; api: API;
   onOpen: (id: string | null) => void; onPublished: () => void; onAdd?: (version: string) => void};
-const stageName: Record<string,string> = {queued: 'Your idea is in line', starting: 'Opening your studio', art: 'Drawing your cover and game art', art_ready: 'Your artwork is ready to review', media: 'Composing your soundtrack', building: 'Bringing your cartridge to life', validating: 'Playtesting all four player counts', ready: 'Ready to play', failed: 'This edit needs another try', cancelled: 'Edit stopped'};
 const assistantText = (text: string) => text
   .replace(/\[[^\]]+\]\(\/(?:work|input|scratch|kit|references)\/[^)]+\)/g, 'your game')
   .replace(/\boutput\.ts\b/g, 'your game').replace(/\*\*|`/g, '');
@@ -31,10 +31,11 @@ export function GameEditor({projectId, remix, token, api, onOpen, onPublished, o
     latestReplay.current = null; followConversation.current = true; firstPlayable.current = false;
     if (!projectId) return;
     const abort = new AbortController();
-    let cursor = 0;
+    let cursor = 0, refreshVersion = 0;
     const refresh = async () => {
+      const version = ++refreshVersion;
       const next = await apiRef.current(`/projects/${projectId}`);
-      if (!abort.signal.aborted) {
+      if (!abort.signal.aborted && version === refreshVersion) {
         setProject(next); setPlayingRevision(prior => prior ?? next.selected_revision);
         if (next.selected_revision && !firstPlayable.current) {firstPlayable.current = true; setMobileTab('play');}
       }
@@ -123,6 +124,7 @@ export function GameEditor({projectId, remix, token, api, onOpen, onPublished, o
   return <section className="game-editor" data-editor-surface aria-label="Game editor">
     <div className="editor-heading"><div><div className="eyebrow">YOUR LITTLE GAME STUDIO</div><h1>{project?.title ?? (remix ? 'Make it your own.' : 'What’s your little big idea?')}</h1><p>{selected ? 'Play, change a little, play again.' : 'Dream it up. Find its look. Bring it to life.'}</p></div>{projectId && <button className="secondary" onClick={() => onOpen(null)}>＋ New game</button>}</div>
     <ol className="studio-journey" aria-label="Creation steps"><li className={artMode && !buildingFirst ? 'current' : 'complete'} aria-current={artMode && !buildingFirst ? 'step' : undefined}><span>01</span> Find the look</li><li className={(!artMode || buildingFirst) && working ? 'current' : selected ? 'complete' : ''} aria-current={(!artMode || buildingFirst) && working ? 'step' : undefined}><span>02</span> Bring it to life</li><li className={selected && !working && !artMode ? 'current' : ''} aria-current={selected && !working && !artMode ? 'step' : undefined}><span>03</span> Play & perfect</li></ol>
+    {working && <BuildProgress turn={working} queueAhead={project.queueAhead} connected={connected} busy={busy} onStop={() => void command(async () => updateProject(await apiRef.current(`/projects/${projectId}/turns/${working.id}/cancel`, {})))}/>}
     {selected && !artMode && <div className="editor-mobile-tabs"><button aria-pressed={mobileTab === 'chat'} onClick={() => setMobileTab('chat')}>Conversation</button><button aria-pressed={mobileTab === 'play'} onClick={() => setMobileTab('play')}>Play ●</button></div>}
     <div className={`editor-columns mobile-${mobileTab} ${!selected || artMode ? 'art-layout' : ''} ${projectId ? 'has-project' : ''}`}>
       <div className="editor-chat">
@@ -140,7 +142,6 @@ export function GameEditor({projectId, remix, token, api, onOpen, onPublished, o
           </div>)}
           {!events.length && <div className="editor-welcome"><span>✦</span><p>{projectId ? 'Opening your conversation…' : 'A sleepy dragon catching marshmallows? A penguin racing the sunrise? Start with a few sentences.'}</p></div>}
         </div>
-        {working && <div className="editor-progress" role="status"><span className="pixel-spark" aria-hidden="true">✦</span><span>{stageName[working.stage] ?? working.stage}{working.status === 'queued' && project.queueAhead > 0 ? ` · ${project.queueAhead} ahead` : ''}</span><button disabled={busy} onClick={() => void command(async () => updateProject(await apiRef.current(`/projects/${projectId}/turns/${working.id}/cancel`, {})))}>Stop</button></div>}
         {!working && ['failed','cancelled'].includes(latestTurn?.status) && <button className="secondary" disabled={busy} onClick={() => void command(async () => updateProject(await apiRef.current(`/projects/${projectId}/turns`, {requestId: crypto.randomUUID(), message: latestTurn.message, retryOf: latestTurn.id})))}>Retry this edit</button>}
         <form className="editor-composer" onSubmit={e => {e.preventDefault(); void submit();}}>
           <label htmlFor="game-message">{projectId ? artMode ? 'Let’s get the look just right' : 'What would you like to change?' : 'The game in your head'}</label>

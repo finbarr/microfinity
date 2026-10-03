@@ -20,7 +20,7 @@ type Props = {
 export function CreationCartridge({media, title, stage, artPhase, reviewing, ready, busy, hasFeedback, compact,
   snapshot, onBuild, onRefine}: Props) {
   const artWorking = stage === 'art' || (artPhase && ['queued', 'starting'].includes(stage ?? ''));
-  const loading = !artWorking && ['queued', 'starting', 'media', 'building', 'validating'].includes(stage ?? '') && !reviewing;
+  const loading = !artWorking && ['queued', 'starting', 'media', 'preparing', 'building', 'validating'].includes(stage ?? '') && !reviewing;
   const dialog = useRef<HTMLDialogElement>(null);
   const [inspection, setInspection] = useState<{url: string; label: string} | null>(null);
   const inspect = (url: string, label: string) => {setInspection({url, label}); dialog.current?.showModal();};
